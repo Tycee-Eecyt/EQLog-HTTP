@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inventory | EQLog HTTP</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">EverQuest inventory scanner</p>
+        <h1>Review character inventory files.</h1>
+        <p class="lede">Manually scan <code>Character-Inventory</code> files and view their parsed item tables away from the parked-location page.</p>
+      </div>
+      <div class="badge">
+        <span>Signed in</span>
+        <strong id="current-user">Loading...</strong>
+        <nav class="page-nav" aria-label="Pages">
+          <a href="/">Parked</a>
+          <a href="/inventory" aria-current="page">Inventory</a>
+        </nav>
+        <form action="/logout" method="post" class="logout-form">
+          <button type="submit" class="ghost compact">Logout</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel scan-panel">
+      <form id="inventory-form">
+        <label for="inventory-picker">EverQuest root folder</label>
+        <div class="input-row">
+          <button id="choose-inventory-folder" type="button">Choose Folder</button>
+          <button id="scan-inventory-button" type="submit" class="ghost" disabled>Scan Character-Inventory Files</button>
+        </div>
+        <input id="inventory-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
+        <p id="selected-inventory-folder" class="selected-folder">No folder selected.</p>
+        <p class="hint">Inventory files are usually saved in the root EverQuest folder by default, not the Logs folder. Chrome/Edge will read only matching <code>Character-Inventory*.txt</code> files through folder access; other files are ignored and not uploaded. This scan is manual only and does not run on the parked-location interval.</p>
+      </form>
+      <div id="inventory-status" class="status" role="status" aria-live="polite">Choose your root EverQuest folder that contains Character-Inventory files.</div>
+    </section>
+
+    <section class="stats" aria-label="Inventory summary">
+      <article>
+        <span id="inventory-file-count">0</span>
+        <p>inventory files</p>
+      </article>
+      <article>
+        <span id="inventory-row-count">0</span>
+        <p>total rows</p>
+      </article>
+      <article>
+        <span id="inventory-character-count">0</span>
+        <p>characters</p>
+      </article>
+      <article>
+        <span id="inventory-last-scan">-</span>
+        <p>last scan</p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Saved inventory</p>
+          <h2>Inventory Files</h2>
+        </div>
+        <button id="refresh-inventory" type="button" class="ghost">Refresh</button>
+      </div>
+      <div id="inventory-files" class="inventory-list">
+        <p class="empty">No inventory files saved yet.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/inventory.js"></script>
+</body>
+</html>

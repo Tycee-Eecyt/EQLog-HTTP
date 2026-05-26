@@ -237,6 +237,31 @@ button.compact {
   margin: 0;
 }
 
+.page-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.page-nav a {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--forest);
+  background: rgba(255, 255, 255, 0.34);
+  font-family: 'Trebuchet MS', Verdana, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.page-nav a[aria-current='page'] {
+  color: #fffdf5;
+  background: var(--forest);
+}
+
 .login-shell {
   width: min(520px, calc(100% - 32px));
   min-height: 100vh;
@@ -435,6 +460,44 @@ td {
 
 .details-panel {
   padding: 18px 24px;
+}
+
+.inventory-list {
+  display: grid;
+  gap: 14px;
+}
+
+.inventory-file {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.inventory-file summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.inventory-file summary span:last-child {
+  color: var(--muted);
+  font-family: 'Trebuchet MS', Verdana, sans-serif;
+  font-size: 0.86rem;
+}
+
+.inventory-table-wrap {
+  margin-top: 14px;
+}
+
+.inventory-table-wrap table {
+  min-width: 960px;
+}
+
+.inventory-table-wrap td {
+  font-family: 'Trebuchet MS', Verdana, sans-serif;
+  font-size: 0.92rem;
 }
 
 summary {

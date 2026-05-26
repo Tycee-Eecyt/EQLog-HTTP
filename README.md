@@ -93,6 +93,16 @@ Use `Auto-scan interval` to scan every 1 to 60 minutes. `Start Auto-Scan` runs o
 
 The browser page must remain open for auto-scan to run. If the browser tab is closed, suspended, or the saved folder permission is revoked, scans stop. For always-on background scanning, a Chrome extension or small local desktop/tray app would be a better architecture.
 
+
+## Inventory Files
+
+Use the `Inventory` page to manually scan EverQuest inventory output files without cluttering the parked-location page. The inventory scanner:
+
+- Looks for `Character-Inventory*.txt` files. EverQuest usually writes these inventory files to the root EverQuest folder by default, not the `Logs` folder.
+- Parses tab-delimited or comma-delimited tables when headers are present.
+- In Chrome/Edge, uses direct folder access and reads only matching inventory files before upload. In fallback browsers, the folder picker may show browser-level upload wording, but the app still filters before sending data. Stores parsed rows in MongoDB under the signed-in account.
+- Does not run on the parked-location auto-scan interval.
+- Shows saved inventory files as expandable tables on `/inventory`.
 ## Saved Folder
 
 On browsers that support the File System Access API, such as Microsoft Edge and Google Chrome, the selected Logs folder is remembered on this device through IndexedDB. When you reopen the page, click `Scan Selected Files` or `Start Auto-Scan` and the browser may ask you to confirm permission before reading the saved folder again.
@@ -108,3 +118,6 @@ Names starting with `Safe` are treated as bots:
 - `All Characters` shows your private characters plus public bots.
 - `My Characters` shows only your non-bot characters.
 - `Bots` shows public shared bots.
+
+
+

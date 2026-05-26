@@ -20,6 +20,7 @@ let mongoClient;
 let db;
 let usersCollection;
 let locationsCollection;
+let inventoryCollection;
 
 function formatMongoSetupError(error) {
   if (error?.code === 'ENOTFOUND' || error?.message?.includes('querySrv ENOTFOUND')) {
@@ -74,6 +75,16 @@ async function getLocationsCollection() {
   }
 
   return locationsCollection;
+}
+
+async function getInventoryCollection() {
+  if (!inventoryCollection) {
+    inventoryCollection = (await getDb()).collection('inventory_files');
+    await inventoryCollection.createIndex({ owner: 1, fileKey: 1 }, { unique: true });
+    await inventoryCollection.createIndex({ owner: 1, scannedAt: -1 });
+  }
+
+  return inventoryCollection;
 }
 
 function normalizeKey(value) {
@@ -322,6 +333,104 @@ async function importZoneEntries(owner, entries, metadata = {}) {
   };
 }
 
+function toClientInventoryFile(record) {
+  return {
+    fileName: record.fileName,
+    character: record.character || '',
+    headers: Array.isArray(record.headers) ? record.headers : [],
+    rows: Array.isArray(record.rows) ? record.rows : [],
+    rowCount: Number(record.rowCount || 0),
+    scannedAt: record.scannedAt instanceof Date ? record.scannedAt.toISOString() : new Date(record.scannedAt).toISOString(),
+  };
+}
+
+async function getInventoryFiles(owner) {
+  const collection = await getInventoryCollection();
+  const records = await collection
+    .find({ owner })
+    .sort({ character: 1, fileName: 1 })
+    .toArray();
+
+  return records.map(toClientInventoryFile);
+}
+
+function inferInventoryCharacter(fileName) {
+  const baseName = String(fileName || '').split(/[\\/]/).pop() || '';
+  const match = baseName.match(/^(.+?)-Inventory/i);
+  return match ? match[1] : '';
+}
+
+function isInventoryFileName(fileName) {
+  const baseName = String(fileName || '').split(/[\\/]/).pop() || '';
+  return /^[^-\\/:]+-Inventory.*\.txt$/i.test(baseName);
+}
+
+async function importInventoryFiles(owner, files) {
+  if (!Array.isArray(files)) {
+    const error = new Error('files must be an array.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const collection = await getInventoryCollection();
+  const results = [];
+
+  for (const file of files) {
+    const fileName = String(file.fileName || '').trim();
+    const rows = Array.isArray(file.rows) ? file.rows : [];
+    const headers = Array.isArray(file.headers) ? file.headers.map(String) : [];
+
+    if (!fileName) {
+      const error = new Error('Inventory files must include fileName.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!isInventoryFileName(fileName)) {
+      const error = new Error('Only Character-Inventory*.txt files can be imported.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const character = String(file.character || inferInventoryCharacter(fileName)).trim();
+    const fileKey = normalizeKey(fileName);
+    const scannedAt = new Date();
+
+    await collection.updateOne(
+      { owner, fileKey },
+      {
+        $set: {
+          owner,
+          fileKey,
+          fileName,
+          character,
+          characterKey: normalizeKey(character),
+          headers,
+          rows,
+          rowCount: rows.length,
+          scannedAt,
+        },
+      },
+      { upsert: true },
+    );
+
+    results.push({
+      fileName,
+      character,
+      rowCount: rows.length,
+      status: 'updated',
+      scannedAt: scannedAt.toISOString(),
+    });
+  }
+
+  return {
+    scannedFiles: files.length,
+    changed: results.length,
+    results,
+    files: await getInventoryFiles(owner),
+  };
+}
+
 function wantsJson(req) {
   return req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
 }
@@ -340,7 +449,7 @@ function requireAuth(req, res, next) {
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use(session({
   name: 'eqlog.sid',
   secret: SESSION_SECRET,
@@ -428,8 +537,32 @@ app.post('/api/import-zone-entries', requireAuth, async (req, res, next) => {
   }
 });
 
+app.get('/api/inventory', requireAuth, async (req, res, next) => {
+  try {
+    res.json({ files: await getInventoryFiles(req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/import-inventory-files', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await importInventoryFiles(req.user.id, req.body.files));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/index.html', requireAuth, (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
+app.get('/inventory', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'inventory.html'));
+});
+
+app.get('/inventory.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'inventory.html'));
 });
 
 app.use(express.static(PUBLIC_DIR, { index: false }));
