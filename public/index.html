@@ -17,15 +17,22 @@
       <div class="badge">
         <span>Signed in</span>
         <strong id="current-user">Loading...</strong>
-        <nav class="page-nav" aria-label="Pages">
-          <a href="/" aria-current="page">Parked</a>
-          <a href="/inventory">Inventory</a>
-        </nav>
         <form action="/logout" method="post" class="logout-form">
           <button type="submit" class="ghost compact">Logout</button>
         </form>
       </div>
     </section>
+
+    <nav class="page-tabs" aria-label="Pages">
+      <a href="/" aria-current="page">
+        <span>Parked</span>
+        <small>Zone locations</small>
+      </a>
+      <a href="/inventory">
+        <span>Inventory</span>
+        <small>Item files</small>
+      </a>
+    </nav>
 
     <section class="panel scan-panel">
       <form id="scan-form">
