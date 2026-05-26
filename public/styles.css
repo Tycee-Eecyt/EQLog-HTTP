@@ -148,7 +148,8 @@ label {
   gap: 10px;
 }
 
-.interval-row {
+.interval-row,
+.timezone-row {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -156,12 +157,18 @@ label {
   margin-top: 14px;
 }
 
-.interval-row label {
+.interval-row label,
+.timezone-row label {
   margin: 0;
 }
 
 .interval-row input {
   width: 84px;
+  padding: 10px 12px;
+}
+
+.timezone-row input {
+  width: min(100%, 260px);
   padding: 10px 12px;
 }
 
@@ -458,7 +465,8 @@ pre {
   }
 
   .input-row,
-  .interval-row {
+  .interval-row,
+  .timezone-row {
     flex-direction: column;
     align-items: stretch;
   }

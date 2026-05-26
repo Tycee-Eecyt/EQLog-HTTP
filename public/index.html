@@ -36,9 +36,14 @@
           <span>minutes</span>
           <button id="auto-scan-button" type="button" class="ghost" disabled>Start Auto-Scan</button>
         </div>
+        <div class="timezone-row">
+          <label for="timezone-input">Log timezone</label>
+          <input id="timezone-input" type="text" autocomplete="off" spellcheck="false" placeholder="America/New_York">
+          <button id="use-local-timezone" type="button" class="ghost compact">Use Local</button>
+        </div>
         <input id="folder-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
         <p id="selected-folder" class="selected-folder">No folder selected.</p>
-        <p class="hint">Expected files: <code>eqlog_Character_server.txt</code>. Zone lines: <code>You have entered Zone Name.</code>. Characters starting with <code>Safe</code> are shared as public bots.</p>
+        <p class="hint">Expected files: <code>eqlog_Character_server.txt</code>. Zone lines: <code>You have entered Zone Name.</code>. Log timestamps are interpreted in the selected timezone. Characters starting with <code>Safe</code> are shared as public bots.</p>
       </form>
       <div id="status" class="status" role="status" aria-live="polite">Choose your EverQuest Logs folder to scan.</div>
     </section>

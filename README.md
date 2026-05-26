@@ -81,6 +81,12 @@ Registration is currently open to anyone who can reach `/register`. If the app i
 5. The app reads `eqlog_*.txt` files, finds lines like `You have entered <zone>.`, and stores the most recent zone timestamp per character.
 6. Existing character locations are only updated when the newly scanned zone-entry time is newer than the saved parked time.
 
+## Timezone Handling
+
+Set `Log timezone` to the timezone used by the computer that writes the EverQuest logs, for example `America/New_York`. The selected timezone is saved in browser localStorage. Log timestamps are parsed as wall-clock time in that timezone and then sent to the server as UTC, with the raw log timestamp and timezone stored alongside the record.
+
+For shared bots, this keeps `newer timestamp wins` consistent when users scan from different regions. If the EQ client writes logs using your local PC clock, use that PC's timezone.
+
 ## Auto-Scan
 
 Use `Auto-scan interval` to scan every 1 to 60 minutes. `Start Auto-Scan` runs one scan immediately and then repeats at the selected interval.

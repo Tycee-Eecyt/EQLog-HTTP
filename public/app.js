@@ -4,6 +4,8 @@ const chooseFolderButton = document.querySelector('#choose-folder-button');
 const scanButton = document.querySelector('#scan-button');
 const autoScanButton = document.querySelector('#auto-scan-button');
 const scanIntervalInput = document.querySelector('#scan-interval');
+const timezoneInput = document.querySelector('#timezone-input');
+const useLocalTimezoneButton = document.querySelector('#use-local-timezone');
 const selectedFolder = document.querySelector('#selected-folder');
 const refreshButton = document.querySelector('#refresh-button');
 const filterButtons = Array.from(document.querySelectorAll('.filter-button'));
@@ -28,6 +30,7 @@ const DB_NAME = 'eqlog-http';
 const DB_VERSION = 1;
 const STORE_NAME = 'settings';
 const LOG_FOLDER_KEY = 'logs-directory-handle';
+const TIMEZONE_KEY = 'eqlog-timezone';
 
 let selectedFiles = [];
 let selectedFolderName = '';
@@ -37,6 +40,9 @@ let activeFilter = 'all';
 let autoScanTimer = null;
 let autoScanActive = false;
 let scanInProgress = false;
+
+const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+timezoneInput.value = localStorage.getItem(TIMEZONE_KEY) || localTimezone;
 
 function supportsDirectoryHandles() {
   return 'showDirectoryPicker' in window && 'indexedDB' in window;
@@ -110,7 +116,57 @@ function parseLogFilename(fileName) {
   return { character: match[1], server: match[2] };
 }
 
-function parseEqTimestamp(line) {
+function getTimezoneParts(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  return Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+}
+
+function zonedTimeToUtc(year, month, day, hour, minute, second, timeZone) {
+  let utcGuess = Date.UTC(year, month, day, hour, minute, second);
+
+  for (let i = 0; i < 3; i += 1) {
+    const parts = getTimezoneParts(new Date(utcGuess), timeZone);
+    const zonedAsUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+    );
+    const offset = zonedAsUtc - utcGuess;
+    const nextGuess = Date.UTC(year, month, day, hour, minute, second) - offset;
+    if (nextGuess === utcGuess) break;
+    utcGuess = nextGuess;
+  }
+
+  return new Date(utcGuess);
+}
+
+function getSelectedTimezone() {
+  const timeZone = timezoneInput.value.trim() || localTimezone;
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+  } catch {
+    throw new Error(`Invalid timezone: ${timeZone}. Use an IANA timezone like America/New_York.`);
+  }
+
+  localStorage.setItem(TIMEZONE_KEY, timeZone);
+  return timeZone;
+}
+
+function parseEqTimestamp(line, timeZone) {
   const match = line.match(/^\[(\w{3}) (\w{3})\s+(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})\]/);
   if (!match) return null;
 
@@ -118,7 +174,7 @@ function parseEqTimestamp(line) {
   const month = MONTHS.get(monthName);
   if (month === undefined) return null;
 
-  const date = new Date(
+  const date = zonedTimeToUtc(
     Number(year),
     month,
     Number(day),
@@ -128,7 +184,11 @@ function parseEqTimestamp(line) {
     0,
   );
 
-  return Number.isNaN(date.getTime()) ? null : date;
+  return Number.isNaN(date.getTime()) ? null : {
+    date,
+    raw: `${monthName} ${day} ${hour}:${minute}:${second} ${year}`,
+    timeZone,
+  };
 }
 
 function parseZoneEntry(line) {
@@ -173,7 +233,7 @@ function renderRecords(records = savedRecords) {
       <td>${escapeHtml(record.server)}</td>
       <td>${escapeHtml(record.zone)}</td>
       <td>${escapeHtml(formatDate(record.enteredAt))}</td>
-      <td>${escapeHtml(record.sourceFile)}</td>
+      <td>${escapeHtml(record.sourceFile)}${record.timeZone ? `<br><small>${escapeHtml(record.timeZone)}</small>` : ''}</td>
     </tr>
   `).join('');
 }
@@ -207,18 +267,20 @@ async function refreshLocations() {
   renderRecords(payload.records || []);
 }
 
-function handleLine(line, currentLatest) {
+function handleLine(line, currentLatest, timeZone) {
   const zone = parseZoneEntry(line);
   if (!zone) return currentLatest;
 
-  const enteredAt = parseEqTimestamp(line);
-  if (!enteredAt) return currentLatest;
+  const timestamp = parseEqTimestamp(line, timeZone);
+  if (!timestamp) return currentLatest;
 
-  if (!currentLatest || enteredAt.getTime() > currentLatest.enteredAtMs) {
+  if (!currentLatest || timestamp.date.getTime() > currentLatest.enteredAtMs) {
     return {
       zone,
-      enteredAt: enteredAt.toISOString(),
-      enteredAtMs: enteredAt.getTime(),
+      enteredAt: timestamp.date.toISOString(),
+      enteredAtMs: timestamp.date.getTime(),
+      enteredAtRaw: timestamp.raw,
+      timeZone: timestamp.timeZone,
       sourceLine: line,
     };
   }
@@ -226,10 +288,10 @@ function handleLine(line, currentLatest) {
   return currentLatest;
 }
 
-async function findLatestZoneEntry(file) {
+async function findLatestZoneEntry(file, timeZone) {
   if (!file.stream) {
     const text = await file.text();
-    return text.split(/\r?\n/).reduce((latest, line) => handleLine(line, latest), null);
+    return text.split(/\r?\n/).reduce((latest, line) => handleLine(line, latest, timeZone), null);
   }
 
   const decoder = new TextDecoder();
@@ -246,12 +308,12 @@ async function findLatestZoneEntry(file) {
     buffered = lines.pop() || '';
 
     for (const line of lines) {
-      latest = handleLine(line, latest);
+      latest = handleLine(line, latest, timeZone);
     }
   }
 
   buffered += decoder.decode();
-  if (buffered) latest = handleLine(buffered, latest);
+  if (buffered) latest = handleLine(buffered, latest, timeZone);
   return latest;
 }
 
@@ -385,6 +447,7 @@ async function runScan({ automatic = false } = {}) {
   let withoutZoneEntry = 0;
 
   try {
+    const timeZone = getSelectedTimezone();
     let filesToScan = selectedFiles.map((file) => ({
       file,
       sourceFile: file.webkitRelativePath || file.name,
@@ -405,7 +468,7 @@ async function runScan({ automatic = false } = {}) {
       if (!identity) continue;
 
       try {
-        const latest = await findLatestZoneEntry(file);
+        const latest = await findLatestZoneEntry(file, timeZone);
         if (!latest) {
           withoutZoneEntry += 1;
           continue;
@@ -416,6 +479,8 @@ async function runScan({ automatic = false } = {}) {
           server: identity.server,
           zone: latest.zone,
           enteredAt: latest.enteredAt,
+          enteredAtRaw: latest.enteredAtRaw,
+          timeZone: latest.timeZone,
           sourceFile,
           sourceLine: latest.sourceLine,
         });
@@ -491,6 +556,21 @@ autoScanButton.addEventListener('click', () => {
 scanIntervalInput.addEventListener('change', () => {
   getIntervalMs();
   if (autoScanActive) startAutoScan();
+});
+
+timezoneInput.addEventListener('change', () => {
+  try {
+    getSelectedTimezone();
+    setStatus(`Log timezone set to ${timezoneInput.value.trim()}.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+useLocalTimezoneButton.addEventListener('click', () => {
+  timezoneInput.value = localTimezone;
+  localStorage.setItem(TIMEZONE_KEY, localTimezone);
+  setStatus(`Log timezone set to local timezone: ${localTimezone}.`);
 });
 
 refreshButton.addEventListener('click', async () => {
