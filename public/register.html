@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register | EQLog HTTP</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="panel login-panel">
+      <p class="eyebrow">Create account</p>
+      <h1>EQLog HTTP</h1>
+      <p class="lede">Register a MongoDB-backed account for your parked-location data.</p>
+
+      <form action="/register" method="post" class="login-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" minlength="3" maxlength="40" pattern="[a-zA-Z0-9_.-]+" required autofocus>
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+
+        <button type="submit">Create Account</button>
+      </form>
+
+      <p id="register-error" class="status error hidden-input"></p>
+      <p class="auth-switch">Already have an account? <a href="/login">Sign in</a>.</p>
+    </section>
+  </main>
+
+  <script>
+    const error = new URLSearchParams(window.location.search).get('error');
+    if (error) {
+      const node = document.querySelector('#register-error');
+      node.textContent = error;
+      node.classList.remove('hidden-input');
+    }
+  </script>
+</body>
+</html>

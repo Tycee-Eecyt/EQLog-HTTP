@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const { ObjectId } = require('mongodb');
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
@@ -12,33 +13,15 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || 'eqlog';
-const SESSION_SECRET = process.env.SESSION_SECRET;
-const AUTH_USERNAME = process.env.AUTH_USERNAME || process.env.LOGIN_USERNAME;
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || process.env.LOGIN_PASSWORD;
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-
-if (IS_PRODUCTION) {
-  const missing = [];
-  if (!MONGODB_URI) missing.push('MONGODB_URI');
-  if (!SESSION_SECRET) missing.push('SESSION_SECRET');
-  if (!AUTH_USERNAME) missing.push('AUTH_USERNAME');
-  if (!AUTH_PASSWORD) missing.push('AUTH_PASSWORD');
-
-  if (missing.length) {
-    throw new Error(`Missing required production environment variable(s): ${missing.join(', ')}`);
-  }
-}
-
-const configuredUser = {
-  id: AUTH_USERNAME || 'admin',
-  username: AUTH_USERNAME || 'admin',
-  password: AUTH_PASSWORD || 'password',
-};
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 
 let mongoClient;
+let db;
+let usersCollection;
 let locationsCollection;
 
-async function getLocationsCollection() {
+async function getDb() {
   if (!MONGODB_URI) {
     const error = new Error('MONGODB_URI is not configured.');
     error.statusCode = 500;
@@ -48,10 +31,24 @@ async function getLocationsCollection() {
   if (!mongoClient) {
     mongoClient = new MongoClient(MONGODB_URI);
     await mongoClient.connect();
+    db = mongoClient.db(MONGODB_DB);
   }
 
+  return db;
+}
+
+async function getUsersCollection() {
+  if (!usersCollection) {
+    usersCollection = (await getDb()).collection('users');
+    await usersCollection.createIndex({ usernameKey: 1 }, { unique: true });
+  }
+
+  return usersCollection;
+}
+
+async function getLocationsCollection() {
   if (!locationsCollection) {
-    locationsCollection = mongoClient.db(MONGODB_DB).collection('parked_locations');
+    locationsCollection = (await getDb()).collection('parked_locations');
     await locationsCollection.createIndex({ owner: 1, serverKey: 1, characterKey: 1 }, { unique: true });
     await locationsCollection.createIndex({ owner: 1, enteredAt: -1 });
   }
@@ -59,37 +56,124 @@ async function getLocationsCollection() {
   return locationsCollection;
 }
 
-function safeCompare(a, b) {
-  const left = Buffer.from(String(a || ''));
-  const right = Buffer.from(String(b || ''));
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-}
-
-passport.use(new LocalStrategy((username, password, done) => {
-  const validUsername = safeCompare(username, configuredUser.username);
-  const validPassword = safeCompare(password, configuredUser.password);
-
-  if (!validUsername || !validPassword) {
-    return done(null, false, { message: 'Invalid username or password.' });
-  }
-
-  return done(null, { id: configuredUser.id, username: configuredUser.username });
-}));
-
-passport.serializeUser((user, done) => done(null, user.username));
-passport.deserializeUser((username, done) => {
-  if (safeCompare(username, configuredUser.username)) {
-    done(null, { id: configuredUser.id, username: configuredUser.username });
-    return;
-  }
-
-  done(null, false);
-});
-
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase();
 }
+
+function createPasswordHash(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(String(password), salt, 310000, 32, 'sha256').toString('hex');
+  return { salt, hash, iterations: 310000, digest: 'sha256' };
+}
+
+function verifyPassword(password, user) {
+  if (!user?.passwordHash || !user?.passwordSalt) return false;
+
+  const candidate = crypto.pbkdf2Sync(
+    String(password),
+    user.passwordSalt,
+    user.passwordIterations || 310000,
+    32,
+    user.passwordDigest || 'sha256',
+  );
+  const stored = Buffer.from(user.passwordHash, 'hex');
+
+  if (candidate.length !== stored.length) return false;
+  return crypto.timingSafeEqual(candidate, stored);
+}
+
+function publicUser(user) {
+  return {
+    id: String(user._id),
+    username: user.username,
+  };
+}
+
+async function findUserByUsername(username) {
+  const collection = await getUsersCollection();
+  return collection.findOne({ usernameKey: normalizeKey(username) });
+}
+
+async function findUserById(id) {
+  if (!ObjectId.isValid(id)) return null;
+  const collection = await getUsersCollection();
+  return collection.findOne({ _id: new ObjectId(id) });
+}
+
+async function createUser(username, password) {
+  const cleanUsername = String(username || '').trim();
+  const cleanPassword = String(password || '');
+
+  if (cleanUsername.length < 3 || cleanUsername.length > 40) {
+    const error = new Error('Username must be between 3 and 40 characters.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+    const error = new Error('Username can only contain letters, numbers, underscores, periods, and hyphens.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (cleanPassword.length < 8) {
+    const error = new Error('Password must be at least 8 characters.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const collection = await getUsersCollection();
+  const passwordData = createPasswordHash(cleanPassword);
+
+  try {
+    const result = await collection.insertOne({
+      username: cleanUsername,
+      usernameKey: normalizeKey(cleanUsername),
+      passwordHash: passwordData.hash,
+      passwordSalt: passwordData.salt,
+      passwordIterations: passwordData.iterations,
+      passwordDigest: passwordData.digest,
+      createdAt: new Date(),
+    });
+
+    return {
+      _id: result.insertedId,
+      username: cleanUsername,
+    };
+  } catch (error) {
+    if (error.code === 11000) {
+      const duplicate = new Error('That username is already registered.');
+      duplicate.statusCode = 409;
+      throw duplicate;
+    }
+
+    throw error;
+  }
+}
+
+passport.use(new LocalStrategy(async (username, password, done) => {
+  try {
+    const user = await findUserByUsername(username);
+
+    if (!user || !verifyPassword(password, user)) {
+      return done(null, false, { message: 'Invalid username or password.' });
+    }
+
+    return done(null, publicUser(user));
+  } catch (error) {
+    return done(error);
+  }
+}));
+
+passport.serializeUser((user, done) => done(null, user.id));
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await findUserById(id);
+    done(null, user ? publicUser(user) : false);
+  } catch (error) {
+    done(error);
+  }
+});
 
 function toClientRecord(record) {
   return {
@@ -214,13 +298,13 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(session({
   name: 'eqlog.sid',
-  secret: SESSION_SECRET || 'dev-only-change-me',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: IS_PRODUCTION,
+    secure: COOKIE_SECURE,
     maxAge: 1000 * 60 * 60 * 24 * 14,
   },
 }));
@@ -241,6 +325,28 @@ app.post('/login', passport.authenticate('local', {
   failureRedirect: '/login?error=1',
 }));
 
+app.get('/register', (req, res) => {
+  if (req.isAuthenticated()) {
+    res.redirect('/');
+    return;
+  }
+
+  res.sendFile(path.join(PUBLIC_DIR, 'register.html'));
+});
+
+app.post('/register', async (req, res, next) => {
+  try {
+    const user = await createUser(req.body.username, req.body.password);
+    req.login(publicUser(user), (error) => {
+      if (error) return next(error);
+      res.redirect('/');
+    });
+  } catch (error) {
+    const message = encodeURIComponent(error.message || 'Registration failed.');
+    res.redirect(`/register?error=${message}`);
+  }
+});
+
 app.post('/logout', (req, res, next) => {
   req.logout((error) => {
     if (error) return next(error);
@@ -257,7 +363,7 @@ app.get('/api/me', requireAuth, (req, res) => {
 
 app.get('/api/locations', requireAuth, async (req, res, next) => {
   try {
-    res.json({ records: await getParkedLocations(req.user.username) });
+    res.json({ records: await getParkedLocations(req.user.id) });
   } catch (error) {
     next(error);
   }
@@ -265,7 +371,7 @@ app.get('/api/locations', requireAuth, async (req, res, next) => {
 
 app.post('/api/import-zone-entries', requireAuth, async (req, res, next) => {
   try {
-    const scan = await importZoneEntries(req.user.username, req.body.entries, {
+    const scan = await importZoneEntries(req.user.id, req.body.entries, {
       folderName: req.body.folderName,
       scannedFiles: req.body.scannedFiles,
       withoutZoneEntry: req.body.withoutZoneEntry,
@@ -298,16 +404,15 @@ app.use((req, res) => {
 
 app.use((error, req, res, next) => {
   const status = error.statusCode || 500;
-  const message = status >= 500 && IS_PRODUCTION ? 'Unexpected server error.' : error.message;
 
   if (status >= 500) console.error(error);
 
   if (wantsJson(req)) {
-    res.status(status).json({ error: message });
+    res.status(status).json({ error: error.message || 'Unexpected server error.' });
     return;
   }
 
-  res.status(status).send(message);
+  res.status(status).send(error.message || 'Unexpected server error.');
 });
 
 process.on('SIGTERM', async () => {
@@ -317,7 +422,7 @@ process.on('SIGTERM', async () => {
 
 app.listen(PORT, () => {
   console.log(`EQLog HTTP listening at http://localhost:${PORT}`);
-  if (!IS_PRODUCTION && (!AUTH_USERNAME || !AUTH_PASSWORD)) {
-    console.log('Development login fallback is admin / password. Set AUTH_USERNAME and AUTH_PASSWORD to override.');
+  if (!process.env.SESSION_SECRET) {
+    console.log('SESSION_SECRET is not set. Sessions will reset whenever the server restarts.');
   }
 });

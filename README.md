@@ -2,7 +2,7 @@
 
 Hosted webpage for scanning an EverQuest log folder and tracking the latest zone entered by each character.
 
-The browser reads your local EQ log files. The server stores only the latest parked-location records in MongoDB, scoped to the signed-in username.
+The browser reads your local EQ log files. The server stores only the latest parked-location records in MongoDB, scoped to the signed-in MongoDB user account.
 
 ## Local Setup
 
@@ -18,8 +18,7 @@ Create `.env` from `.env.example` and set:
 MONGODB_URI=your MongoDB Atlas connection string
 MONGODB_DB=eqlog
 SESSION_SECRET=a long random string
-AUTH_USERNAME=your username
-AUTH_PASSWORD=your password
+COOKIE_SECURE=false
 ```
 
 Run:
@@ -34,13 +33,7 @@ Open:
 http://localhost:3000
 ```
 
-If `AUTH_USERNAME` and `AUTH_PASSWORD` are missing in local development only, the fallback login is:
-
-```text
-admin / password
-```
-
-Production requires explicit auth environment variables.
+Create an account from `/register`, then sign in from `/login`. Usernames and salted password hashes are stored in the MongoDB `users` collection.
 
 ## Render Setup
 
@@ -60,19 +53,27 @@ Start Command: npm start
 
 ```text
 NODE_VERSION=20
-NODE_ENV=production
 MONGODB_URI=mongodb+srv://...
 MONGODB_DB=eqlog
 SESSION_SECRET=<long random value>
-AUTH_USERNAME=<your login>
-AUTH_PASSWORD=<your password>
+COOKIE_SECURE=false
 ```
 
 You can also use `render.yaml` as a Blueprint and fill in the secret values in Render.
 
+## Authentication
+
+Authentication uses Passport Local Strategy backed by MongoDB:
+
+- `users` collection stores usernames and PBKDF2 salted password hashes.
+- `parked_locations` records are scoped by the authenticated user id.
+- No `AUTH_USERNAME`, `AUTH_PASSWORD`, or `NODE_ENV` variable is required.
+
+Registration is currently open to anyone who can reach `/register`. If the app is public and you only want personal access, keep the Render URL private or add an invite-code / admin approval step later.
+
 ## Usage
 
-1. Log in.
+1. Register or log in.
 2. Click `Choose Logs Folder`.
 3. Select your EverQuest `Logs` folder in File Explorer.
 4. Click `Scan Selected Files`.

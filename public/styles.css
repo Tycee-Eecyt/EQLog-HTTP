@@ -240,6 +240,18 @@ button.compact {
   margin: 6px 0 0;
 }
 
+.auth-switch {
+  margin: 18px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-switch a {
+  color: var(--forest);
+  font-family: 'Trebuchet MS', Verdana, sans-serif;
+  font-weight: 800;
+}
+
 .hint,
 .status {
   color: var(--muted);

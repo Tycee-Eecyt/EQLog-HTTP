@@ -8,15 +8,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
-      - key: NODE_ENV
-        value: production
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DB
         value: eqlog
       - key: SESSION_SECRET
         generateValue: true
-      - key: AUTH_USERNAME
-        sync: false
-      - key: AUTH_PASSWORD
-        sync: false
+      - key: COOKIE_SECURE
+        value: "false"
