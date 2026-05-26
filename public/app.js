@@ -2,6 +2,8 @@ const form = document.querySelector('#scan-form');
 const folderPicker = document.querySelector('#folder-picker');
 const chooseFolderButton = document.querySelector('#choose-folder-button');
 const scanButton = document.querySelector('#scan-button');
+const autoScanButton = document.querySelector('#auto-scan-button');
+const scanIntervalInput = document.querySelector('#scan-interval');
 const selectedFolder = document.querySelector('#selected-folder');
 const refreshButton = document.querySelector('#refresh-button');
 const filterButtons = Array.from(document.querySelectorAll('.filter-button'));
@@ -32,6 +34,9 @@ let selectedFolderName = '';
 let selectedDirectoryHandle = null;
 let savedRecords = [];
 let activeFilter = 'all';
+let autoScanTimer = null;
+let autoScanActive = false;
+let scanInProgress = false;
 
 function supportsDirectoryHandles() {
   return 'showDirectoryPicker' in window && 'indexedDB' in window;
@@ -132,7 +137,7 @@ function parseZoneEntry(line) {
 }
 
 function isBot(record) {
-  return /^safe/i.test(record.character || '');
+  return Boolean(record.isBot) || /^safe/i.test(record.character || '');
 }
 
 function getFilteredRecords() {
@@ -162,6 +167,7 @@ function renderRecords(records = savedRecords) {
         <span class="character-cell">
           <strong>${escapeHtml(record.character)}</strong>
           ${isBot(record) ? '<span class="bot-badge">Bot</span>' : ''}
+          ${record.visibility === 'public' ? '<span class="public-badge">Public</span>' : ''}
         </span>
       </td>
       <td>${escapeHtml(record.server)}</td>
@@ -254,6 +260,23 @@ function getFolderName(files) {
   return firstPath ? firstPath.split('/')[0] : 'Selected Logs folder';
 }
 
+function hasScannableSelection() {
+  return Boolean(selectedDirectoryHandle) || selectedFiles.length > 0;
+}
+
+function updateScanButtons() {
+  const canScan = hasScannableSelection() && !scanInProgress;
+  scanButton.disabled = !canScan;
+  autoScanButton.disabled = !hasScannableSelection();
+  autoScanButton.textContent = autoScanActive ? 'Stop Auto-Scan' : 'Start Auto-Scan';
+}
+
+function getIntervalMs() {
+  const minutes = Math.min(60, Math.max(1, Number(scanIntervalInput.value || 5)));
+  scanIntervalInput.value = String(minutes);
+  return minutes * 60 * 1000;
+}
+
 async function getLogFilesFromDirectory(directoryHandle) {
   const files = [];
 
@@ -283,7 +306,7 @@ async function loadSavedDirectoryHandle() {
     selectedDirectoryHandle = handle;
     selectedFolderName = handle.name;
     selectedFolder.textContent = `${handle.name}: saved on this device. Click Scan Selected Files to reuse it.`;
-    scanButton.disabled = false;
+    updateScanButtons();
     setStatus('Saved Logs folder loaded. Your browser may ask for permission when scanning.');
   } catch (error) {
     setStatus(`Could not load saved folder permission: ${error.message}`, true);
@@ -312,7 +335,8 @@ chooseFolderButton.addEventListener('click', async () => {
     selectedFolder.textContent = logFiles.length
       ? `${handle.name}: ${logFiles.length} EQ log file(s) ready. Folder saved on this device.`
       : `${handle.name}: no eqlog_Character_server.txt files found. Folder saved on this device.`;
-    scanButton.disabled = logFiles.length === 0;
+    if (logFiles.length === 0) selectedDirectoryHandle = null;
+    updateScanButtons();
     setStatus(logFiles.length ? 'Folder selected and saved. Click Scan Selected Files.' : 'Choose a folder containing EverQuest log files.', logFiles.length === 0);
   } catch (error) {
     if (error.name !== 'AbortError') setStatus(error.message, true);
@@ -339,21 +363,22 @@ folderPicker.addEventListener('change', () => {
     ? `${selectedFolderName}: ${selectedFiles.length} EQ log file(s) ready.`
     : `${selectedFolderName || 'Selected folder'}: no eqlog_Character_server.txt files found.`;
 
-  scanButton.disabled = selectedFiles.length === 0;
+  updateScanButtons();
   setStatus(selectedFiles.length ? 'Folder selected. Click Scan Selected Files.' : 'Choose a folder containing EverQuest log files.', selectedFiles.length === 0);
 });
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-
+async function runScan({ automatic = false } = {}) {
   if (!selectedDirectoryHandle && !selectedFiles.length) {
     setStatus('Choose your EverQuest Logs folder first.', true);
     return;
   }
 
-  scanButton.disabled = true;
+  if (scanInProgress) return;
+
+  scanInProgress = true;
+  updateScanButtons();
   chooseFolderButton.disabled = true;
-  setStatus('Scanning selected log file(s)...');
+  setStatus(automatic ? 'Auto-scan running...' : 'Scanning selected log file(s)...');
 
   const entries = [];
   const errors = [];
@@ -413,13 +438,59 @@ form.addEventListener('submit', async (event) => {
 
     applyScanSummary(scan);
     const suffix = scan.errors?.length ? ` ${scan.errors.length} file error(s); see scan details.` : '';
-    setStatus(`Scanned ${scan.scannedFiles} selected log file(s). Updated ${scan.changed}; kept ${scan.unchanged} because saved times were newer.${suffix}`, Boolean(scan.errors?.length));
+    const prefix = automatic ? 'Auto-scan complete.' : 'Scan complete.';
+    setStatus(`${prefix} Scanned ${scan.scannedFiles} selected log file(s). Updated ${scan.changed}; kept ${scan.unchanged} because saved times were newer.${suffix}`, Boolean(scan.errors?.length));
   } catch (error) {
     setStatus(error.message, true);
+    if (automatic) stopAutoScan(`Auto-scan stopped: ${error.message}`);
   } finally {
-    scanButton.disabled = !selectedDirectoryHandle && selectedFiles.length === 0;
+    scanInProgress = false;
+    updateScanButtons();
     chooseFolderButton.disabled = false;
   }
+}
+
+function stopAutoScan(message = 'Auto-scan stopped.') {
+  if (autoScanTimer) clearInterval(autoScanTimer);
+  autoScanTimer = null;
+  autoScanActive = false;
+  updateScanButtons();
+  setStatus(message);
+}
+
+function startAutoScan() {
+  if (!hasScannableSelection()) {
+    setStatus('Choose your EverQuest Logs folder before starting auto-scan.', true);
+    return;
+  }
+
+  if (autoScanTimer) clearInterval(autoScanTimer);
+  autoScanActive = true;
+  autoScanTimer = setInterval(() => {
+    runScan({ automatic: true });
+  }, getIntervalMs());
+  updateScanButtons();
+  setStatus(`Auto-scan started. It will run every ${scanIntervalInput.value} minute(s) while this page stays open.`);
+  runScan({ automatic: true });
+}
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await runScan();
+});
+
+autoScanButton.addEventListener('click', () => {
+  if (autoScanActive) {
+    stopAutoScan();
+    return;
+  }
+
+  startAutoScan();
+});
+
+scanIntervalInput.addEventListener('change', () => {
+  getIntervalMs();
+  if (autoScanActive) startAutoScan();
 });
 
 refreshButton.addEventListener('click', async () => {

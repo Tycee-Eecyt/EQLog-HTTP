@@ -70,6 +70,7 @@ async function getLocationsCollection() {
     locationsCollection = (await getDb()).collection('parked_locations');
     await locationsCollection.createIndex({ owner: 1, serverKey: 1, characterKey: 1 }, { unique: true });
     await locationsCollection.createIndex({ owner: 1, enteredAt: -1 });
+    await locationsCollection.createIndex({ visibility: 1, enteredAt: -1 });
   }
 
   return locationsCollection;
@@ -77,6 +78,10 @@ async function getLocationsCollection() {
 
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function isBotCharacter(character) {
+  return /^safe/i.test(String(character || '').trim());
 }
 
 function createPasswordHash(password) {
@@ -199,6 +204,8 @@ function toClientRecord(record) {
     character: record.character,
     server: record.server,
     zone: record.zone,
+    visibility: record.visibility || (isBotCharacter(record.character) ? 'public' : 'private'),
+    isBot: isBotCharacter(record.character),
     enteredAt: record.enteredAt instanceof Date ? record.enteredAt.toISOString() : new Date(record.enteredAt).toISOString(),
     sourceFile: record.sourceFile || '',
     sourceLine: record.sourceLine || '',
@@ -209,7 +216,13 @@ function toClientRecord(record) {
 async function getParkedLocations(owner) {
   const collection = await getLocationsCollection();
   const records = await collection
-    .find({ owner })
+    .find({
+      $or: [
+        { visibility: 'public' },
+        { owner, visibility: 'private' },
+        { owner, visibility: { $exists: false }, characterKey: { $not: /^safe/ } },
+      ],
+    })
     .sort({ enteredAt: -1, serverKey: 1, characterKey: 1 })
     .toArray();
 
@@ -235,16 +248,21 @@ async function applyLatestEntry(owner, entry) {
   const zone = String(entry.zone).trim();
   const characterKey = normalizeKey(character);
   const serverKey = normalizeKey(server);
+  const isBot = isBotCharacter(character);
+  const recordOwner = isBot ? 'public' : owner;
+  const visibility = isBot ? 'public' : 'private';
 
-  const previous = await collection.findOne({ owner, characterKey, serverKey });
+  const previous = await collection.findOne({ owner: recordOwner, characterKey, serverKey });
   const shouldUpdate = !previous || enteredAt.getTime() > new Date(previous.enteredAt).getTime();
 
   if (shouldUpdate) {
     await collection.updateOne(
-      { owner, characterKey, serverKey },
+      { owner: recordOwner, characterKey, serverKey },
       {
         $set: {
-          owner,
+          owner: recordOwner,
+          scannedBy: owner,
+          visibility,
           character,
           characterKey,
           server,
@@ -266,6 +284,8 @@ async function applyLatestEntry(owner, entry) {
     server,
     zone,
     enteredAt: enteredAt.toISOString(),
+    visibility,
+    isBot,
     status: shouldUpdate ? 'updated' : 'kept-existing',
     previousEnteredAt: previous?.enteredAt ? new Date(previous.enteredAt).toISOString() : null,
   };

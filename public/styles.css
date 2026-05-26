@@ -148,6 +148,23 @@ label {
   gap: 10px;
 }
 
+.interval-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.interval-row label {
+  margin: 0;
+}
+
+.interval-row input {
+  width: 84px;
+  padding: 10px 12px;
+}
+
 input {
   width: 100%;
   min-width: 0;
@@ -360,6 +377,20 @@ pre {
   text-transform: uppercase;
 }
 
+.public-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #fffdf5;
+  background: var(--forest);
+  font-family: 'Trebuchet MS', Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -426,8 +457,10 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .input-row {
+  .input-row,
+  .interval-row {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .section-heading,

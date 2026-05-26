@@ -2,7 +2,7 @@
 
 Hosted webpage for scanning an EverQuest log folder and tracking the latest zone entered by each character.
 
-The browser reads your local EQ log files. The server stores only the latest parked-location records in MongoDB, scoped to the signed-in MongoDB user account.
+The browser reads your local EQ log files. The server stores only the latest parked-location records in MongoDB. Normal characters are private to the signed-in account. Characters whose names start with `Safe` are treated as bots and are shared with every signed-in user.
 
 ## Local Setup
 
@@ -66,7 +66,8 @@ You can also use `render.yaml` as a Blueprint and fill in the secret values in R
 Authentication uses Passport Local Strategy backed by MongoDB:
 
 - `users` collection stores usernames and PBKDF2 salted password hashes.
-- `parked_locations` records are scoped by the authenticated user id.
+- Private `parked_locations` records are scoped by authenticated user id.
+- Public bot records are shared by all users.
 - No `AUTH_USERNAME`, `AUTH_PASSWORD`, or `NODE_ENV` variable is required.
 
 Registration is currently open to anyone who can reach `/register`. If the app is public and you only want personal access, keep the Render URL private or add an invite-code / admin approval step later.
@@ -80,12 +81,24 @@ Registration is currently open to anyone who can reach `/register`. If the app i
 5. The app reads `eqlog_*.txt` files, finds lines like `You have entered <zone>.`, and stores the most recent zone timestamp per character.
 6. Existing character locations are only updated when the newly scanned zone-entry time is newer than the saved parked time.
 
+## Auto-Scan
+
+Use `Auto-scan interval` to scan every 1 to 60 minutes. `Start Auto-Scan` runs one scan immediately and then repeats at the selected interval.
+
+The browser page must remain open for auto-scan to run. If the browser tab is closed, suspended, or the saved folder permission is revoked, scans stop. For always-on background scanning, a Chrome extension or small local desktop/tray app would be a better architecture.
+
 ## Saved Folder
 
-On browsers that support the File System Access API, such as Microsoft Edge and Google Chrome, the selected Logs folder is remembered on this device through IndexedDB. When you reopen the page, click `Scan Selected Files` and the browser may ask you to confirm permission before reading the saved folder again.
+On browsers that support the File System Access API, such as Microsoft Edge and Google Chrome, the selected Logs folder is remembered on this device through IndexedDB. When you reopen the page, click `Scan Selected Files` or `Start Auto-Scan` and the browser may ask you to confirm permission before reading the saved folder again.
 
 Cookies and localStorage cannot store real folder access permissions. If your browser does not support saved directory handles, the app falls back to the normal folder picker and you will need to select the folder again after reloading the page.
 
-## Filters
+## Visibility And Filters
 
-Names starting with `Safe` are treated as bots. Use the table filter to show all characters, my characters, or bots.
+Names starting with `Safe` are treated as bots:
+
+- Bots are stored as public records and shared with every signed-in user.
+- Non-bot characters are private to the account that scanned them.
+- `All Characters` shows your private characters plus public bots.
+- `My Characters` shows only your non-bot characters.
+- `Bots` shows public shared bots.

@@ -30,9 +30,15 @@
           <button id="choose-folder-button" type="button">Choose Logs Folder</button>
           <button id="scan-button" type="submit" class="ghost" disabled>Scan Selected Files</button>
         </div>
+        <div class="interval-row">
+          <label for="scan-interval">Auto-scan interval</label>
+          <input id="scan-interval" type="number" min="1" max="60" step="1" value="5">
+          <span>minutes</span>
+          <button id="auto-scan-button" type="button" class="ghost" disabled>Start Auto-Scan</button>
+        </div>
         <input id="folder-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
         <p id="selected-folder" class="selected-folder">No folder selected.</p>
-        <p class="hint">Expected files: <code>eqlog_Character_server.txt</code>. Zone lines: <code>You have entered Zone Name.</code></p>
+        <p class="hint">Expected files: <code>eqlog_Character_server.txt</code>. Zone lines: <code>You have entered Zone Name.</code>. Characters starting with <code>Safe</code> are shared as public bots.</p>
       </form>
       <div id="status" class="status" role="status" aria-live="polite">Choose your EverQuest Logs folder to scan.</div>
     </section>
