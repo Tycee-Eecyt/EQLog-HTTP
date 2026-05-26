@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EQLog HTTP</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">EverQuest log scanner</p>
+        <h1>Track where each character was last parked.</h1>
+        <p class="lede">Scan your EQ Logs folder. The app finds the latest zone-entry line per character and only overwrites saved locations when the log time is newer.</p>
+      </div>
+      <div class="badge">
+        <span>Signed in</span>
+        <strong id="current-user">Loading...</strong>
+        <form action="/logout" method="post" class="logout-form">
+          <button type="submit" class="ghost compact">Logout</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel scan-panel">
+      <form id="scan-form">
+        <label for="folder-picker">EverQuest Logs folder</label>
+        <div class="input-row">
+          <button id="choose-folder-button" type="button">Choose Logs Folder</button>
+          <button id="scan-button" type="submit" class="ghost" disabled>Scan Selected Files</button>
+        </div>
+        <input id="folder-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
+        <p id="selected-folder" class="selected-folder">No folder selected.</p>
+        <p class="hint">Expected files: <code>eqlog_Character_server.txt</code>. Zone lines: <code>You have entered Zone Name.</code></p>
+      </form>
+      <div id="status" class="status" role="status" aria-live="polite">Choose your EverQuest Logs folder to scan.</div>
+    </section>
+
+    <section class="stats" aria-label="Scan summary">
+      <article>
+        <span id="scanned-files">0</span>
+        <p>files scanned</p>
+      </article>
+      <article>
+        <span id="changed-count">0</span>
+        <p>locations updated</p>
+      </article>
+      <article>
+        <span id="unchanged-count">0</span>
+        <p>kept newer saved time</p>
+      </article>
+      <article>
+        <span id="record-count">0</span>
+        <p>shown characters</p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Saved state</p>
+          <h2>Parked Locations</h2>
+        </div>
+        <div class="table-actions">
+          <div class="filter-group" aria-label="Character filter">
+            <button type="button" class="filter-button active" data-filter="all">All Characters</button>
+            <button type="button" class="filter-button" data-filter="mine">My Characters</button>
+            <button type="button" class="filter-button" data-filter="bots">Bots</button>
+          </div>
+          <button id="refresh-button" type="button" class="ghost">Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Character</th>
+              <th>Server</th>
+              <th>Zone</th>
+              <th>Entered</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody id="locations-body">
+            <tr><td colspan="5" class="empty">No saved locations yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel details-panel">
+      <details>
+        <summary>Last scan details</summary>
+        <pre id="scan-details">No scan has run in this browser session.</pre>
+      </details>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

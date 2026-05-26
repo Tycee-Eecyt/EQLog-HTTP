@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login | EQLog HTTP</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="panel login-panel">
+      <p class="eyebrow">Private access</p>
+      <h1>EQLog HTTP</h1>
+      <p class="lede">Sign in to scan logs and sync parked locations to MongoDB.</p>
+
+      <form action="/login" method="post" class="login-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+        <button type="submit">Sign In</button>
+      </form>
+
+      <p id="login-error" class="status error hidden-input">Invalid username or password.</p>
+    </section>
+  </main>
+
+  <script>
+    if (new URLSearchParams(window.location.search).has('error')) {
+      document.querySelector('#login-error').classList.remove('hidden-input');
+    }
+  </script>
+</body>
+</html>
