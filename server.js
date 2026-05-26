@@ -21,6 +21,18 @@ let db;
 let usersCollection;
 let locationsCollection;
 
+function formatMongoSetupError(error) {
+  if (error?.code === 'ENOTFOUND' || error?.message?.includes('querySrv ENOTFOUND')) {
+    return 'MongoDB host was not found. Re-copy the public mongodb+srv connection string from MongoDB Atlas: Connect > Drivers. Do not use a private endpoint hostname unless this server can resolve it.';
+  }
+
+  if (error?.message?.includes('bad auth') || error?.codeName === 'AuthenticationFailed') {
+    return 'MongoDB authentication failed. Check the database username and password in MONGODB_URI.';
+  }
+
+  return error?.message || 'MongoDB connection failed.';
+}
+
 async function getDb() {
   if (!MONGODB_URI) {
     const error = new Error('MONGODB_URI is not configured.');
@@ -29,9 +41,16 @@ async function getDb() {
   }
 
   if (!mongoClient) {
-    mongoClient = new MongoClient(MONGODB_URI);
-    await mongoClient.connect();
-    db = mongoClient.db(MONGODB_DB);
+    try {
+      mongoClient = new MongoClient(MONGODB_URI);
+      await mongoClient.connect();
+      db = mongoClient.db(MONGODB_DB);
+    } catch (error) {
+      mongoClient = null;
+      const setupError = new Error(formatMongoSetupError(error));
+      setupError.statusCode = 500;
+      throw setupError;
+    }
   }
 
   return db;
