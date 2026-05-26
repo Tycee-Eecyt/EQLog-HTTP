@@ -181,7 +181,7 @@ function parseEqTimestamp(line, timeZone) {
     Number(hour),
     Number(minute),
     Number(second),
-    0,
+    timeZone,
   );
 
   return Number.isNaN(date.getTime()) ? null : {
