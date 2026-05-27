@@ -424,6 +424,22 @@ pre {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.favorite-button {
+  border: 1px solid rgba(216, 146, 52, 0.45);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--forest);
+  background: rgba(216, 146, 52, 0.13);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.favorite-button.active {
+  color: #fffdf5;
+  background: var(--amber);
 }
 
 .bot-badge {
@@ -575,5 +591,9 @@ pre {
 
   button {
     width: 100%;
+  }
+
+  .favorite-button {
+    width: auto;
   }
 }

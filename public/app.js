@@ -33,12 +33,14 @@ const LOG_FOLDER_KEY = 'logs-directory-handle';
 const TIMEZONE_KEY = 'eqlog-timezone';
 const AUTO_SCAN_KEY = 'eqlog-auto-scan-enabled';
 const SCAN_INTERVAL_KEY = 'eqlog-scan-interval-minutes';
+const FAVORITES_KEY = 'eqlog-favorite-characters';
 
 let selectedFiles = [];
 let selectedFolderName = '';
 let selectedDirectoryHandle = null;
 let savedRecords = [];
 let activeFilter = 'all';
+let favoriteCharacters = loadFavoriteCharacters();
 let autoScanTimer = null;
 let autoScanActive = false;
 let scanInProgress = false;
@@ -119,6 +121,37 @@ function escapeHtml(value) {
     "'": '&#39;',
     '"': '&quot;',
   }[char]));
+}
+
+function characterFavoriteKey(record) {
+  return `${String(record.server || '').trim().toLowerCase()}::${String(record.character || '').trim().toLowerCase()}`;
+}
+
+function loadFavoriteCharacters() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavoriteCharacters() {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(favoriteCharacters).sort()));
+}
+
+function isFavorite(record) {
+  return favoriteCharacters.has(characterFavoriteKey(record));
+}
+
+function setFavorite(record, enabled) {
+  const key = characterFavoriteKey(record);
+  if (enabled) {
+    favoriteCharacters.add(key);
+  } else {
+    favoriteCharacters.delete(key);
+  }
+  saveFavoriteCharacters();
 }
 
 function parseLogFilename(fileName) {
@@ -212,6 +245,7 @@ function isBot(record) {
 }
 
 function getFilteredRecords() {
+  if (activeFilter === 'favorites') return savedRecords.filter(isFavorite);
   if (activeFilter === 'bots') return savedRecords.filter(isBot);
   if (activeFilter === 'mine') return savedRecords.filter((record) => !isBot(record));
   return savedRecords;
@@ -228,14 +262,23 @@ function renderRecords(records = savedRecords) {
   }
 
   if (!filteredRecords.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty">No characters match this filter.</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="empty">${activeFilter === 'favorites' ? 'No favorite characters selected yet.' : 'No characters match this filter.'}</td></tr>`;
     return;
   }
 
-  body.innerHTML = filteredRecords.map((record) => `
+  body.innerHTML = filteredRecords.map((record) => {
+    const favorite = isFavorite(record);
+    return `
     <tr>
       <td>
         <span class="character-cell">
+          <button
+            type="button"
+            class="favorite-button ${favorite ? 'active' : ''}"
+            data-favorite-key="${escapeHtml(characterFavoriteKey(record))}"
+            aria-pressed="${favorite ? 'true' : 'false'}"
+            title="${favorite ? 'Remove from favorites' : 'Add to favorites'}"
+          >${favorite ? 'Favorited' : '+ Favorite'}</button>
           <strong>${escapeHtml(record.character)}</strong>
           ${isBot(record) ? '<span class="bot-badge">Bot</span>' : ''}
           ${record.visibility === 'public' ? '<span class="public-badge">Public</span>' : ''}
@@ -246,7 +289,8 @@ function renderRecords(records = savedRecords) {
       <td>${escapeHtml(formatDate(record.enteredAt))}</td>
       <td>${escapeHtml(record.sourceFile)}${record.timeZone ? `<br><small>${escapeHtml(record.timeZone)}</small>` : ''}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function applyScanSummary(scan) {
@@ -427,6 +471,20 @@ filterButtons.forEach((button) => {
     });
     renderRecords();
   });
+});
+
+body.addEventListener('click', (event) => {
+  const button = event.target.closest('.favorite-button');
+  if (!button) return;
+
+  const key = button.dataset.favoriteKey;
+  const record = savedRecords.find((candidate) => characterFavoriteKey(candidate) === key);
+  if (!record) return;
+
+  const nextFavoriteState = !isFavorite(record);
+  setFavorite(record, nextFavoriteState);
+  renderRecords();
+  setStatus(`${record.character} ${nextFavoriteState ? 'added to' : 'removed from'} favorites.`);
 });
 
 folderPicker.addEventListener('change', () => {
