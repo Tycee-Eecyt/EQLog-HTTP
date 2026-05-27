@@ -27,13 +27,16 @@ const MONTHS = new Map([
 ]);
 
 const DB_NAME = 'eqlog-http';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'settings';
 const LOG_FOLDER_KEY = 'logs-directory-handle';
 const TIMEZONE_KEY = 'eqlog-timezone';
 const AUTO_SCAN_KEY = 'eqlog-auto-scan-enabled';
 const SCAN_INTERVAL_KEY = 'eqlog-scan-interval-minutes';
 const FAVORITES_KEY = 'eqlog-favorite-characters';
+const LOCATIONS_CACHE_KEY = 'locations';
+const QUEUED_LOCATIONS_CACHE_KEY = 'queued-locations';
+const ME_CACHE_KEY = 'me';
 
 let selectedFiles = [];
 let selectedFolderName = '';
@@ -58,7 +61,10 @@ function openSettingsDb() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME);
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains('syncQueue')) db.createObjectStore('syncQueue', { autoIncrement: true });
+      if (!db.objectStoreNames.contains('cachedApi')) db.createObjectStore('cachedApi');
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -299,6 +305,74 @@ function applyScanSummary(scan) {
   counters.unchanged.textContent = scan.unchanged ?? 0;
   renderRecords(scan.records || []);
   details.textContent = JSON.stringify(scan, null, 2);
+  window.EQLogOffline?.setCached(LOCATIONS_CACHE_KEY, { records: scan.records || [] });
+}
+
+function recordsFromEntries(entries) {
+  return entries.map((entry) => ({
+    character: entry.character,
+    server: entry.server,
+    zone: entry.zone,
+    visibility: /^safe/i.test(entry.character || '') ? 'public' : 'private',
+    isBot: /^safe/i.test(entry.character || ''),
+    enteredAt: entry.enteredAt,
+    enteredAtRaw: entry.enteredAtRaw || '',
+    timeZone: entry.timeZone || '',
+    sourceFile: entry.sourceFile || '',
+    sourceLine: entry.sourceLine || '',
+    scannedAt: new Date().toISOString(),
+    queued: true,
+  }));
+}
+
+async function applyQueuedZoneScan(requestBody) {
+  const queuedRecords = recordsFromEntries(requestBody.entries || []);
+  const nextRecords = [...savedRecords];
+
+  for (const record of queuedRecords) {
+    const index = nextRecords.findIndex((candidate) => (
+      characterFavoriteKey(candidate) === characterFavoriteKey(record)
+      && String(candidate.visibility || '') === String(record.visibility || '')
+    ));
+
+    if (index === -1) {
+      nextRecords.push(record);
+      continue;
+    }
+
+    const currentMs = Date.parse(nextRecords[index].enteredAt);
+    const queuedMs = Date.parse(record.enteredAt);
+    if (Number.isNaN(currentMs) || queuedMs >= currentMs) nextRecords[index] = record;
+  }
+
+  nextRecords.sort((a, b) => Date.parse(b.enteredAt) - Date.parse(a.enteredAt));
+  await window.EQLogOffline?.setCached(LOCATIONS_CACHE_KEY, { records: nextRecords });
+  await window.EQLogOffline?.setCached(QUEUED_LOCATIONS_CACHE_KEY, { queuedAt: new Date().toISOString() });
+  renderRecords(nextRecords);
+  details.textContent = JSON.stringify({
+    queued: true,
+    folder: requestBody.folderName,
+    scannedFiles: requestBody.scannedFiles,
+    withoutZoneEntry: requestBody.withoutZoneEntry,
+    errors: requestBody.errors,
+    entries: requestBody.entries,
+  }, null, 2);
+}
+
+async function syncQueuedScans({ silent = false } = {}) {
+  if (!navigator.onLine || !window.EQLogOffline) return;
+
+  const queuedItems = await window.EQLogOffline.getQueue();
+  if (!queuedItems.length) return;
+
+  try {
+    const synced = await window.EQLogOffline.replayQueue();
+    const latestLocations = [...synced].reverse().find((result) => result.item.url === '/api/import-zone-entries');
+    if (latestLocations?.payload) applyScanSummary(latestLocations.payload);
+    if (!silent) setStatus(`Synced ${synced.length} offline scan request(s) to MongoDB.`);
+  } catch (error) {
+    if (!silent) setStatus(error.message, true);
+  }
 }
 
 async function fetchJson(url, options) {
@@ -312,13 +386,33 @@ async function fetchJson(url, options) {
   return payload;
 }
 
+async function fetchCachedJson(url, cacheKey, fallbackValue) {
+  try {
+    const payload = await fetchJson(url);
+    await window.EQLogOffline?.setCached(cacheKey, payload);
+    return payload;
+  } catch (error) {
+    const cached = await window.EQLogOffline?.getCached(cacheKey);
+    if (cached) {
+      setStatus('Offline mode: showing the last saved data from this device.');
+      return cached;
+    }
+    if (!navigator.onLine) return fallbackValue;
+    throw error;
+  }
+}
+
+function isNetworkError(error) {
+  return !navigator.onLine || error instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(error.message || '');
+}
+
 async function loadCurrentUser() {
-  const payload = await fetchJson('/api/me');
-  currentUser.textContent = payload.user?.username || 'Unknown';
+  const payload = await fetchCachedJson('/api/me', ME_CACHE_KEY, { user: { username: 'Offline' } });
+  currentUser.textContent = payload.user?.username || 'Offline';
 }
 
 async function refreshLocations() {
-  const payload = await fetchJson('/api/locations');
+  const payload = await fetchCachedJson('/api/locations', LOCATIONS_CACHE_KEY, { records: [] });
   renderRecords(payload.records || []);
 }
 
@@ -561,17 +655,33 @@ async function runScan({ automatic = false } = {}) {
       }
     }
 
-    const scan = await fetchJson('/api/import-zone-entries', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        folderName: selectedFolderName,
-        scannedFiles: filesToScan.length,
-        withoutZoneEntry,
-        errors,
-        entries,
-      }),
-    });
+    const requestBody = {
+      folderName: selectedFolderName,
+      scannedFiles: filesToScan.length,
+      withoutZoneEntry,
+      errors,
+      entries,
+    };
+
+    let scan;
+    try {
+      scan = await fetchJson('/api/import-zone-entries', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (error) {
+      if (!isNetworkError(error) || !window.EQLogOffline) throw error;
+
+      await window.EQLogOffline.queueRequest({
+        url: '/api/import-zone-entries',
+        method: 'POST',
+        body: requestBody,
+      });
+      await applyQueuedZoneScan(requestBody);
+      setStatus(`Offline mode: scanned ${filesToScan.length} file(s) and queued the update. It will sync to MongoDB when internet access returns.`, Boolean(errors.length));
+      return;
+    }
 
     applyScanSummary(scan);
     const suffix = scan.errors?.length ? ` ${scan.errors.length} file error(s); see scan details.` : '';
@@ -651,6 +761,7 @@ useLocalTimezoneButton.addEventListener('click', () => {
 
 refreshButton.addEventListener('click', async () => {
   try {
+    await syncQueuedScans({ silent: true });
     await refreshLocations();
     setStatus('Loaded saved parked locations.');
   } catch (error) {
@@ -658,7 +769,13 @@ refreshButton.addEventListener('click', async () => {
   }
 });
 
+window.addEventListener('online', () => {
+  syncQueuedScans();
+});
+
 async function initialize() {
+  await syncQueuedScans({ silent: true });
+
   await Promise.all([
     loadCurrentUser().catch((error) => setStatus(error.message, true)),
     refreshLocations().catch((error) => setStatus(error.message, true)),

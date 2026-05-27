@@ -25,16 +25,21 @@ function supportsDirectoryPicker() {
 }
 
 const DB_NAME = 'eqlog-http';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'settings';
 const ROOT_FOLDER_KEY = 'everquest-root-directory-handle';
+const INVENTORY_CACHE_KEY = 'inventory';
+const ME_CACHE_KEY = 'me';
 
 function openSettingsDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME);
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains('syncQueue')) db.createObjectStore('syncQueue', { autoIncrement: true });
+      if (!db.objectStoreNames.contains('cachedApi')) db.createObjectStore('cachedApi');
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -102,9 +107,29 @@ async function fetchJson(url, options) {
   return payload;
 }
 
+async function fetchCachedJson(url, cacheKey, fallbackValue) {
+  try {
+    const payload = await fetchJson(url);
+    await window.EQLogOffline?.setCached(cacheKey, payload);
+    return payload;
+  } catch (error) {
+    const cached = await window.EQLogOffline?.getCached(cacheKey);
+    if (cached) {
+      setStatus('Offline mode: showing the last saved inventory from this device.');
+      return cached;
+    }
+    if (!navigator.onLine) return fallbackValue;
+    throw error;
+  }
+}
+
+function isNetworkError(error) {
+  return !navigator.onLine || error instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(error.message || '');
+}
+
 async function loadCurrentUser() {
-  const payload = await fetchJson('/api/me');
-  currentUser.textContent = payload.user?.username || 'Unknown';
+  const payload = await fetchCachedJson('/api/me', ME_CACHE_KEY, { user: { username: 'Offline' } });
+  currentUser.textContent = payload.user?.username || 'Offline';
 }
 
 function getFolderName(files) {
@@ -278,8 +303,27 @@ function renderInventory(files) {
 }
 
 async function refreshInventory() {
-  const payload = await fetchJson('/api/inventory');
+  const payload = await fetchCachedJson('/api/inventory', INVENTORY_CACHE_KEY, { files: [] });
   renderInventory(payload.files || []);
+}
+
+async function syncQueuedScans({ silent = false } = {}) {
+  if (!navigator.onLine || !window.EQLogOffline) return;
+
+  const queuedItems = await window.EQLogOffline.getQueue();
+  if (!queuedItems.length) return;
+
+  try {
+    const synced = await window.EQLogOffline.replayQueue();
+    const latestInventory = [...synced].reverse().find((result) => result.item.url === '/api/import-inventory-files');
+    if (latestInventory?.payload) {
+      renderInventory(latestInventory.payload.files || []);
+      await window.EQLogOffline.setCached(INVENTORY_CACHE_KEY, { files: latestInventory.payload.files || [] });
+    }
+    if (!silent) setStatus(`Synced ${synced.length} offline scan request(s) to MongoDB.`);
+  } catch (error) {
+    if (!silent) setStatus(error.message, true);
+  }
 }
 
 chooseButton.addEventListener('click', async () => {
@@ -368,13 +412,37 @@ form.addEventListener('submit', async (event) => {
       });
     }
 
-    const result = await fetchJson('/api/import-inventory-files', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ files }),
-    });
+    const requestBody = { files };
+    let result;
+
+    try {
+      result = await fetchJson('/api/import-inventory-files', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (error) {
+      if (!isNetworkError(error) || !window.EQLogOffline) throw error;
+
+      const queuedFiles = files.map((file) => ({
+        ...file,
+        rowCount: file.rows.length,
+        scannedAt: new Date().toISOString(),
+        queued: true,
+      }));
+      await window.EQLogOffline.queueRequest({
+        url: '/api/import-inventory-files',
+        method: 'POST',
+        body: requestBody,
+      });
+      await window.EQLogOffline.setCached(INVENTORY_CACHE_KEY, { files: queuedFiles });
+      renderInventory(queuedFiles);
+      setStatus(`Offline mode: parsed ${files.length} Character-Inventory file(s) and queued the upload. It will sync to MongoDB when internet access returns.`);
+      return;
+    }
 
     renderInventory(result.files || []);
+    await window.EQLogOffline?.setCached(INVENTORY_CACHE_KEY, { files: result.files || [] });
     setStatus(`Scanned ${result.scannedFiles} Character-Inventory file(s). Updated ${result.changed}.`);
   } catch (error) {
     setStatus(error.message, true);
@@ -386,6 +454,7 @@ form.addEventListener('submit', async (event) => {
 
 refreshButton.addEventListener('click', async () => {
   try {
+    await syncQueuedScans({ silent: true });
     await refreshInventory();
     setStatus('Loaded saved inventory files.');
   } catch (error) {
@@ -393,7 +462,14 @@ refreshButton.addEventListener('click', async () => {
   }
 });
 
+window.addEventListener('online', () => {
+  syncQueuedScans();
+});
+
+syncQueuedScans({ silent: true }).finally(() => {
+  refreshInventory().catch((error) => setStatus(error.message, true));
+});
+
 loadCurrentUser().catch((error) => setStatus(error.message, true));
-refreshInventory().catch((error) => setStatus(error.message, true));
 loadSavedDirectoryHandle();
 updateButtons();
