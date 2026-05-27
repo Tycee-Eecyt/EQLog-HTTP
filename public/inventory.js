@@ -17,10 +17,53 @@ const counters = {
 
 let selectedFiles = [];
 let selectedFolderName = '';
+let selectedDirectoryHandle = null;
 let scanning = false;
 
 function supportsDirectoryPicker() {
-  return 'showDirectoryPicker' in window;
+  return 'showDirectoryPicker' in window && 'indexedDB' in window;
+}
+
+const DB_NAME = 'eqlog-http';
+const DB_VERSION = 1;
+const STORE_NAME = 'settings';
+const ROOT_FOLDER_KEY = 'everquest-root-directory-handle';
+
+function openSettingsDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(STORE_NAME);
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getStoredValue(key) {
+  const db = await openSettingsDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const request = transaction.objectStore(STORE_NAME).get(key);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+  });
+}
+
+async function setStoredValue(key, value) {
+  const db = await openSettingsDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const request = transaction.objectStore(STORE_NAME).put(value, key);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+  });
 }
 
 function setStatus(message, isError = false) {
@@ -150,7 +193,7 @@ function parseInventoryText(text) {
 }
 
 function updateButtons() {
-  scanButton.disabled = scanning || selectedFiles.length === 0;
+  scanButton.disabled = scanning || (!selectedDirectoryHandle && selectedFiles.length === 0);
   chooseButton.disabled = scanning;
 }
 
@@ -165,6 +208,30 @@ async function getInventoryFilesFromDirectory(directoryHandle) {
 
   files.sort((a, b) => a.file.name.localeCompare(b.file.name));
   return files;
+}
+
+async function ensureDirectoryPermission(directoryHandle) {
+  const options = { mode: 'read' };
+  if ((await directoryHandle.queryPermission(options)) === 'granted') return true;
+  return (await directoryHandle.requestPermission(options)) === 'granted';
+}
+
+async function loadSavedDirectoryHandle() {
+  if (!supportsDirectoryPicker()) return;
+
+  try {
+    const handle = await getStoredValue(ROOT_FOLDER_KEY);
+    if (!handle) return;
+
+    selectedDirectoryHandle = handle;
+    selectedFolderName = handle.name;
+    selectedFiles = [];
+    selectedFolder.textContent = `${handle.name}: saved on this device. Click Scan Character-Inventory Files to reuse it.`;
+    updateButtons();
+    setStatus('Saved EverQuest root folder loaded. Your browser may ask for permission when scanning.');
+  } catch (error) {
+    setStatus(`Could not load saved root folder permission: ${error.message}`, true);
+  }
 }
 
 function renderInventory(files) {
@@ -228,12 +295,15 @@ chooseButton.addEventListener('click', async () => {
       startIn: 'documents',
     });
 
+    selectedDirectoryHandle = handle;
     selectedFolderName = handle.name;
+    selectedFiles = [];
+    await setStoredValue(ROOT_FOLDER_KEY, handle);
     selectedFiles = await getInventoryFilesFromDirectory(handle);
 
     selectedFolder.textContent = selectedFiles.length
-      ? `${selectedFolderName}: ${selectedFiles.length} Character-Inventory file(s) ready. Only matching files will be read and uploaded.`
-      : `${selectedFolderName}: no Character-Inventory*.txt files found.`;
+      ? `${selectedFolderName}: ${selectedFiles.length} Character-Inventory file(s) ready. Folder saved on this device.`
+      : `${selectedFolderName}: no Character-Inventory*.txt files found. Folder saved on this device.`;
 
     updateButtons();
     setStatus(selectedFiles.length ? 'Folder selected. Click Scan Character-Inventory Files.' : 'Choose your root EverQuest folder containing Character-Inventory files.', selectedFiles.length === 0);
@@ -244,6 +314,7 @@ chooseButton.addEventListener('click', async () => {
 
 picker.addEventListener('change', () => {
   const files = Array.from(picker.files || []);
+  selectedDirectoryHandle = null;
   selectedFolderName = getFolderName(files);
   selectedFiles = files.filter(isInventoryFile).map((file) => ({
     file,
@@ -261,7 +332,7 @@ picker.addEventListener('change', () => {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
 
-  if (!selectedFiles.length) {
+  if (!selectedDirectoryHandle && !selectedFiles.length) {
     setStatus('Choose inventory files first.', true);
     return;
   }
@@ -271,6 +342,17 @@ form.addEventListener('submit', async (event) => {
   setStatus(`Parsing ${selectedFiles.length} Character-Inventory file(s)...`);
 
   try {
+    if (selectedDirectoryHandle) {
+      const hasPermission = await ensureDirectoryPermission(selectedDirectoryHandle);
+      if (!hasPermission) throw new Error('Browser permission is required to read the saved EverQuest root folder.');
+      selectedFiles = await getInventoryFilesFromDirectory(selectedDirectoryHandle);
+      selectedFolderName = selectedDirectoryHandle.name;
+    }
+
+    if (!selectedFiles.length) {
+      throw new Error('No Character-Inventory*.txt files were found in the selected folder.');
+    }
+
     const files = [];
 
     for (const item of selectedFiles) {
@@ -313,4 +395,5 @@ refreshButton.addEventListener('click', async () => {
 
 loadCurrentUser().catch((error) => setStatus(error.message, true));
 refreshInventory().catch((error) => setStatus(error.message, true));
+loadSavedDirectoryHandle();
 updateButtons();

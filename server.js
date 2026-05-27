@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const { ObjectId } = require('mongodb');
 const express = require('express');
@@ -13,14 +14,35 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || 'eqlog';
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_SECRET_FILE = path.join(__dirname, 'data', 'session-secret');
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
+const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 30;
 
 let mongoClient;
 let db;
 let usersCollection;
 let locationsCollection;
 let inventoryCollection;
+let sessionsCollection;
+
+function getSessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+
+  fs.mkdirSync(path.dirname(SESSION_SECRET_FILE), { recursive: true });
+
+  try {
+    const storedSecret = fs.readFileSync(SESSION_SECRET_FILE, 'utf8').trim();
+    if (storedSecret) return storedSecret;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(SESSION_SECRET_FILE, secret, { mode: 0o600 });
+  return secret;
+}
+
+const SESSION_SECRET = getSessionSecret();
 
 function formatMongoSetupError(error) {
   if (error?.code === 'ENOTFOUND' || error?.message?.includes('querySrv ENOTFOUND')) {
@@ -85,6 +107,86 @@ async function getInventoryCollection() {
   }
 
   return inventoryCollection;
+}
+
+async function getSessionsCollection() {
+  if (!sessionsCollection) {
+    sessionsCollection = (await getDb()).collection('sessions');
+    await sessionsCollection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+  }
+
+  return sessionsCollection;
+}
+
+class MongoSessionStore extends session.Store {
+  async get(sid, callback) {
+    try {
+      const collection = await getSessionsCollection();
+      const record = await collection.findOne({
+        _id: sid,
+        expiresAt: { $gt: new Date() },
+      });
+      callback(null, record?.session || null);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  async set(sid, sessionData, callback) {
+    try {
+      const collection = await getSessionsCollection();
+      const cookieExpires = sessionData?.cookie?.expires;
+      const expiresAt = cookieExpires ? new Date(cookieExpires) : new Date(Date.now() + SESSION_MAX_AGE);
+
+      await collection.updateOne(
+        { _id: sid },
+        {
+          $set: {
+            session: sessionData,
+            expiresAt,
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true },
+      );
+
+      callback(null);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  async destroy(sid, callback) {
+    try {
+      const collection = await getSessionsCollection();
+      await collection.deleteOne({ _id: sid });
+      callback(null);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  async touch(sid, sessionData, callback) {
+    try {
+      const collection = await getSessionsCollection();
+      const cookieExpires = sessionData?.cookie?.expires;
+      const expiresAt = cookieExpires ? new Date(cookieExpires) : new Date(Date.now() + SESSION_MAX_AGE);
+
+      await collection.updateOne(
+        { _id: sid },
+        {
+          $set: {
+            expiresAt,
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      callback(null);
+    } catch (error) {
+      callback(error);
+    }
+  }
 }
 
 function normalizeKey(value) {
@@ -452,14 +554,16 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '25mb' }));
 app.use(session({
   name: 'eqlog.sid',
+  store: new MongoSessionStore(),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  rolling: true,
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
     secure: COOKIE_SECURE,
-    maxAge: 1000 * 60 * 60 * 24 * 14,
+    maxAge: SESSION_MAX_AGE,
   },
 }));
 app.use(passport.initialize());
@@ -601,6 +705,6 @@ process.on('SIGTERM', async () => {
 app.listen(PORT, () => {
   console.log(`EQLog HTTP listening at http://localhost:${PORT}`);
   if (!process.env.SESSION_SECRET) {
-    console.log('SESSION_SECRET is not set. Sessions will reset whenever the server restarts.');
+    console.log(`SESSION_SECRET is not set. Using persistent local secret at ${SESSION_SECRET_FILE}.`);
   }
 });

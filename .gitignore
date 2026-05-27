@@ -2,5 +2,6 @@
 .env.*
 !.env.example
 data/*.json
+data/session-secret
 !data/.gitkeep
 node_modules/

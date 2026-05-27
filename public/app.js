@@ -31,6 +31,8 @@ const DB_VERSION = 1;
 const STORE_NAME = 'settings';
 const LOG_FOLDER_KEY = 'logs-directory-handle';
 const TIMEZONE_KEY = 'eqlog-timezone';
+const AUTO_SCAN_KEY = 'eqlog-auto-scan-enabled';
+const SCAN_INTERVAL_KEY = 'eqlog-scan-interval-minutes';
 
 let selectedFiles = [];
 let selectedFolderName = '';
@@ -43,6 +45,7 @@ let scanInProgress = false;
 
 const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 timezoneInput.value = localStorage.getItem(TIMEZONE_KEY) || localTimezone;
+scanIntervalInput.value = localStorage.getItem(SCAN_INTERVAL_KEY) || scanIntervalInput.value;
 
 function supportsDirectoryHandles() {
   return 'showDirectoryPicker' in window && 'indexedDB' in window;
@@ -88,6 +91,14 @@ async function setStoredValue(key, value) {
 function setStatus(message, isError = false) {
   statusBox.textContent = message;
   statusBox.classList.toggle('error', isError);
+}
+
+function notifyTimezoneMismatch() {
+  const selectedTimezone = timezoneInput.value.trim() || localTimezone;
+  if (selectedTimezone === localTimezone) return false;
+
+  setStatus(`Timezone alert: log timezone is set to ${selectedTimezone}, but this device is using ${localTimezone}.`, true);
+  return true;
 }
 
 function formatDate(value) {
@@ -336,6 +347,7 @@ function updateScanButtons() {
 function getIntervalMs() {
   const minutes = Math.min(60, Math.max(1, Number(scanIntervalInput.value || 5)));
   scanIntervalInput.value = String(minutes);
+  localStorage.setItem(SCAN_INTERVAL_KEY, String(minutes));
   return minutes * 60 * 1000;
 }
 
@@ -369,7 +381,9 @@ async function loadSavedDirectoryHandle() {
     selectedFolderName = handle.name;
     selectedFolder.textContent = `${handle.name}: saved on this device. Click Scan Selected Files to reuse it.`;
     updateScanButtons();
-    setStatus('Saved Logs folder loaded. Your browser may ask for permission when scanning.');
+    if (!notifyTimezoneMismatch()) {
+      setStatus('Saved Logs folder loaded. Your browser may ask for permission when scanning.');
+    }
   } catch (error) {
     setStatus(`Could not load saved folder permission: ${error.message}`, true);
   }
@@ -519,6 +533,7 @@ function stopAutoScan(message = 'Auto-scan stopped.') {
   if (autoScanTimer) clearInterval(autoScanTimer);
   autoScanTimer = null;
   autoScanActive = false;
+  localStorage.setItem(AUTO_SCAN_KEY, 'false');
   updateScanButtons();
   setStatus(message);
 }
@@ -531,6 +546,7 @@ function startAutoScan() {
 
   if (autoScanTimer) clearInterval(autoScanTimer);
   autoScanActive = true;
+  localStorage.setItem(AUTO_SCAN_KEY, 'true');
   autoScanTimer = setInterval(() => {
     runScan({ automatic: true });
   }, getIntervalMs());
@@ -561,7 +577,9 @@ scanIntervalInput.addEventListener('change', () => {
 timezoneInput.addEventListener('change', () => {
   try {
     getSelectedTimezone();
-    setStatus(`Log timezone set to ${timezoneInput.value.trim()}.`);
+    if (!notifyTimezoneMismatch()) {
+      setStatus(`Log timezone set to ${timezoneInput.value.trim()}.`);
+    }
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -582,6 +600,21 @@ refreshButton.addEventListener('click', async () => {
   }
 });
 
-loadCurrentUser().catch((error) => setStatus(error.message, true));
-refreshLocations().catch((error) => setStatus(error.message, true));
-loadSavedDirectoryHandle();
+async function initialize() {
+  await Promise.all([
+    loadCurrentUser().catch((error) => setStatus(error.message, true)),
+    refreshLocations().catch((error) => setStatus(error.message, true)),
+    loadSavedDirectoryHandle(),
+  ]);
+
+  getIntervalMs();
+
+  if (localStorage.getItem(AUTO_SCAN_KEY) === 'true' && hasScannableSelection()) {
+    startAutoScan();
+    return;
+  }
+
+  notifyTimezoneMismatch();
+}
+
+initialize();
