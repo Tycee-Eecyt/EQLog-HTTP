@@ -206,4 +206,4 @@ DISCORD_STATUS_CHANNEL_ID=<channel id>
 DISCORD_AUTO_POST_MINUTES=60
 ```
 
-When `DISCORD_STATUS_CHANNEL_ID` is set, the bot posts one status message when it starts. If `DISCORD_AUTO_POST_MINUTES` is greater than `0`, the bot refreshes that same message instead of posting a new message each time. The saved message id is stored locally in `data/discord-status-message.json`.
+When `DISCORD_STATUS_CHANNEL_ID` is set, the bot posts one status message when it starts. If `DISCORD_AUTO_POST_MINUTES` is greater than `0`, the bot refreshes that same message instead of posting a new message each time. The saved message id is stored in MongoDB when `MONGODB_URI` is configured, with `data/discord-status-message.json` kept as a local fallback. If no saved id is available, the bot searches recent channel messages for its latest `Safe Bot Parking Update` embed before sending a new one.

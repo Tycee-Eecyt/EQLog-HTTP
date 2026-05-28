@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { MongoClient } = require('mongodb');
 const {
   Client,
   EmbedBuilder,
@@ -20,6 +21,9 @@ const botsToken = process.env.EQLOG_BOTS_TOKEN || process.env.DISCORD_BOT_API_TO
 const rawStatusChannelId = process.env.DISCORD_STATUS_CHANNEL_ID || '';
 const autoPostMinutes = Number(process.env.DISCORD_AUTO_POST_MINUTES || 0);
 const statusMessageFile = path.join(__dirname, '..', 'data', 'discord-status-message.json');
+const mongodbUri = process.env.MONGODB_URI || '';
+const mongodbDb = process.env.MONGODB_DB || 'eqlog';
+const STATUS_MESSAGE_TITLE = 'Safe Bot Parking Update';
 
 if (!token) {
   console.error('DISCORD_TOKEN is required to run the Discord bot.');
@@ -45,6 +49,61 @@ function cleanOptionalSnowflake(value, label) {
 
 const statusChannelId = cleanOptionalSnowflake(rawStatusChannelId, 'DISCORD_STATUS_CHANNEL_ID');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+let mongoClient;
+let statusMessagesCollection;
+
+async function getStatusMessagesCollection() {
+  if (!mongodbUri) return null;
+  if (statusMessagesCollection) return statusMessagesCollection;
+
+  mongoClient = new MongoClient(mongodbUri);
+  await mongoClient.connect();
+  statusMessagesCollection = mongoClient.db(mongodbDb).collection('discord_status_messages');
+  return statusMessagesCollection;
+}
+
+async function readStoredStatusMessageId(channelId) {
+  try {
+    const collection = await getStatusMessagesCollection();
+    if (collection) {
+      const record = await collection.findOne({ _id: channelId });
+      if (record?.messageId) return String(record.messageId);
+    }
+  } catch (error) {
+    console.warn(`Could not read Discord status message id from MongoDB: ${error.message}`);
+  }
+
+  const state = await readStatusMessageState();
+  return state[channelId] || '';
+}
+
+async function writeStoredStatusMessageId(channelId, messageId) {
+  try {
+    const collection = await getStatusMessagesCollection();
+    if (collection) {
+      await collection.updateOne(
+        { _id: channelId },
+        {
+          $set: {
+            channelId,
+            messageId,
+            title: STATUS_MESSAGE_TITLE,
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true },
+      );
+    }
+  } catch (error) {
+    console.warn(`Could not save Discord status message id to MongoDB: ${error.message}`);
+  }
+
+  const state = await readStatusMessageState();
+  await writeStatusMessageState({
+    ...state,
+    [channelId]: messageId,
+  });
+}
 
 async function readStatusMessageState() {
   try {
@@ -58,6 +117,16 @@ async function readStatusMessageState() {
 async function writeStatusMessageState(state) {
   await fs.mkdir(path.dirname(statusMessageFile), { recursive: true });
   await fs.writeFile(statusMessageFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
+
+async function findExistingStatusMessage(channel) {
+  const messages = await channel.messages.fetch({ limit: 50 });
+  return Array.from(messages.values())
+    .filter((message) => (
+      message.author?.id === client.user.id
+      && message.embeds?.some((embed) => embed.title === STATUS_MESSAGE_TITLE)
+    ))
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0] || null;
 }
 
 function formatAge(value) {
@@ -294,9 +363,8 @@ async function sendStatusChannelUpdate() {
   }
 
   const records = await fetchSafeBots();
-  const payload = { embeds: buildRosterEmbeds(records, 'Safe Bot Parking Update') };
-  const state = await readStatusMessageState();
-  const savedMessageId = state[statusChannelId];
+  const payload = { embeds: buildRosterEmbeds(records, STATUS_MESSAGE_TITLE) };
+  const savedMessageId = await readStoredStatusMessageId(statusChannelId);
 
   if (savedMessageId) {
     try {
@@ -308,11 +376,15 @@ async function sendStatusChannelUpdate() {
     }
   }
 
+  const existingMessage = await findExistingStatusMessage(channel);
+  if (existingMessage) {
+    await existingMessage.edit(payload);
+    await writeStoredStatusMessageId(statusChannelId, existingMessage.id);
+    return { action: 'edited', messageId: existingMessage.id };
+  }
+
   const message = await channel.send(payload);
-  await writeStatusMessageState({
-    ...state,
-    [statusChannelId]: message.id,
-  });
+  await writeStoredStatusMessageId(statusChannelId, message.id);
   return { action: 'sent', messageId: message.id };
 }
 
