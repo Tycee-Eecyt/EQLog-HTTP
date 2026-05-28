@@ -35,6 +35,12 @@ Run:
 npm start
 ```
 
+`npm start` runs the web server and, when Discord bot environment variables are present, starts the Discord bot in the same terminal for easier local testing. To run only the web server, use:
+
+```powershell
+npm run start:web
+```
+
 Open:
 
 ```text
@@ -143,7 +149,7 @@ If `DISCORD_BOT_API_TOKEN` is not configured, the endpoint still works for signe
 
 ## Discord Bot
 
-The included Discord bot adds a `/safebots` slash command that posts the Safe bot parking list into the Discord channel where the command is used.
+The included Discord bot adds Safe Space roster commands that post the Safe bot parking list into the Discord channel where the command is used.
 
 Create a Discord application at the Discord Developer Portal, add a bot user, copy its token, then invite it to your server with the `applications.commands` and `bot` scopes. The bot only needs permission to send messages and embed links.
 
@@ -170,9 +176,17 @@ Run the bot:
 npm run discord:bot
 ```
 
-Use `/safebots` in a Discord channel. Optional filters are available for class and search text.
+Use `/safebots` or `/roster` in a Discord channel. Optional filters are available for class and search text. `/bots` lists one class, `/bot` shows a single Safe bot detail card, `/setclass` manually assigns a class to a Safe bot, and `/quake` posts a priority parking snapshot for quick mobilization.
 
-In production, run the web app and Discord bot as separate processes. For example, keep the Render web service start command as `npm start`, then add a Render Background Worker with start command `npm run discord:bot` using the same Discord and EQLog API environment variables.
+Classes are inferred from Safe bot names by default. To override an inferred class, run:
+
+```text
+/setclass name:Safecoth class:Wizard
+```
+
+Choose `Unknown` in `/setclass` to clear the manual override and return to name-based inference.
+
+In production, you can still run the web app and Discord bot as separate processes. For example, use `npm run start:web` for the Render web service, then add a Render Background Worker with start command `npm run start:bot` using the same Discord and EQLog API environment variables. If you use `npm start` on a service with Discord env vars present, it starts both processes together.
 
 For automatic channel posts, set:
 

@@ -7,6 +7,12 @@ const {
   EmbedBuilder,
   GatewayIntentBits,
 } = require('discord.js');
+const {
+  inferClass,
+  getClassConfig,
+  formatClass,
+  sortBots,
+} = require('./roster-config');
 
 const token = process.env.DISCORD_TOKEN;
 const botsUrl = process.env.EQLOG_BOTS_URL || 'http://localhost:3000/api/discord/bots';
@@ -52,30 +58,6 @@ async function readStatusMessageState() {
 async function writeStatusMessageState(state) {
   await fs.mkdir(path.dirname(statusMessageFile), { recursive: true });
   await fs.writeFile(statusMessageFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-}
-
-function inferClass(record) {
-  const name = String(record.character || '').toLowerCase();
-  const zone = String(record.zone || '').toLowerCase();
-
-  if (/heal|cleric|clr|rez/.test(name)) return 'cleric';
-  if (/wiz|port|evac/.test(name)) return 'wizard';
-  if (/war|tank/.test(name)) return 'warrior';
-  if (/mage|mag|mod/.test(name)) return 'magician';
-  if (/dru|track|snare/.test(name)) return 'druid';
-  if (/sham|slow|shm/.test(name)) return 'shaman';
-  if (/ranger|rng/.test(name)) return 'ranger';
-  if (/paladin|pal/.test(name)) return 'paladin';
-  if (/sk|shadow/.test(name)) return 'shadow-knight';
-  if (/necro|nec/.test(name) || zone.includes('paineel')) return 'necromancer';
-  return 'unknown';
-}
-
-function formatClass(className) {
-  return className
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
 }
 
 function formatAge(value) {
@@ -126,8 +108,38 @@ async function fetchSafeBots() {
   const data = await response.json();
   return (data.records || []).map((record) => ({
     ...record,
-    className: inferClass(record),
-  }));
+    className: record.className || inferClass(record),
+  })).sort(sortBots);
+}
+
+async function setSafeBotClass(name, className, server = '') {
+  const classUrl = `${botsUrl.replace(/\/$/, '')}/${encodeURIComponent(name)}/class`;
+  let response;
+
+  try {
+    response = await fetch(classUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${botsToken}`,
+      },
+      body: JSON.stringify({ className, server }),
+    });
+  } catch (error) {
+    throw new Error(`Could not reach EQLog API at ${classUrl}.`);
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`EQLog API returned ${response.status}: ${body}`);
+  }
+
+  const data = await response.json();
+  return {
+    ...data.record,
+    className: data.record?.className || inferClass(data.record || {}),
+  };
 }
 
 function filterBots(records, className, search) {
@@ -146,7 +158,28 @@ function filterBots(records, className, search) {
   });
 }
 
-function buildBotEmbeds(records, title = 'Safe Bot Parking') {
+function compactZone(zone) {
+  return String(zone || 'Unknown').replace(/\s+/g, ' ').trim() || 'Unknown';
+}
+
+function botDisplayName(record) {
+  return record.character || record.name || 'Unknown';
+}
+
+function botReadyLabel(record) {
+  return record.ready || (record.zone && record.zone !== 'Unknown') ? 'Parked' : 'Unknown';
+}
+
+function groupBotsByClass(records) {
+  return records.reduce((groups, record) => {
+    const className = record.className || inferClass(record);
+    if (!groups[className]) groups[className] = [];
+    groups[className].push(record);
+    return groups;
+  }, {});
+}
+
+function buildRosterEmbeds(records, title = 'Safe Space Bot Roster') {
   if (!records.length) {
     return [
       new EmbedBuilder()
@@ -157,32 +190,89 @@ function buildBotEmbeds(records, title = 'Safe Bot Parking') {
     ];
   }
 
-  const chunks = [];
-  for (let index = 0; index < records.length; index += 25) {
-    chunks.push(records.slice(index, index + 25));
+  const grouped = groupBotsByClass(records);
+  const classNames = Object.keys(grouped).sort((a, b) => sortBots({ className: a, character: '' }, { className: b, character: '' }));
+  const fields = [];
+
+  classNames.forEach((className) => {
+    const config = getClassConfig(className);
+    const lines = grouped[className].sort(sortBots).map((record) => (
+      `**${botDisplayName(record)}** · ${compactZone(record.zone)} · ${formatAge(record.enteredAt)}`
+    ));
+
+    fields.push({
+      name: `${config.marker} ${config.label} (${grouped[className].length})`,
+      value: lines.join('\n').slice(0, 1024) || 'None',
+      inline: false,
+    });
+  });
+
+  const fieldChunks = [];
+  for (let index = 0; index < fields.length; index += 10) {
+    fieldChunks.push(fields.slice(index, index + 10));
   }
 
-  return chunks.slice(0, 10).map((chunk, index) => {
+  return fieldChunks.slice(0, 10).map((chunk, index) => {
     const embed = new EmbedBuilder()
       .setTitle(index === 0 ? title : `${title} (${index + 1})`)
       .setColor(0xffbf22)
+      .setDescription('Live parking pulled from EQ log scans. Use /bot for a single character.')
       .setFooter({ text: `${records.length} Safe bot${records.length === 1 ? '' : 's'} shown` })
       .setTimestamp(new Date());
 
-    chunk.forEach((record) => {
-      embed.addFields({
-        name: `${record.character || 'Unknown'} · ${formatClass(record.className)}`,
-        value: [
-          `Zone: ${record.zone || 'Unknown'}`,
-          `Server: ${record.server || 'Unknown'}`,
-          `Parked: ${formatAge(record.enteredAt)} (${formatTimestamp(record.enteredAt)})`,
-        ].join('\n'),
-        inline: true,
-      });
-    });
+    embed.addFields(chunk);
 
     return embed;
   });
+}
+
+function buildBotDetailEmbed(record) {
+  const className = record.className || inferClass(record);
+  const config = getClassConfig(className);
+
+  return new EmbedBuilder()
+    .setTitle(`${botDisplayName(record)} · ${config.label}`)
+    .setColor(config.color)
+    .addFields(
+      { name: 'Class Source', value: record.classSource === 'manual' ? 'Manual' : 'Inferred', inline: true },
+      { name: 'Zone', value: compactZone(record.zone), inline: true },
+      { name: 'Server', value: record.server || 'Unknown', inline: true },
+      { name: 'Status', value: botReadyLabel(record), inline: true },
+      { name: 'Parked', value: `${formatAge(record.enteredAt)} (${formatTimestamp(record.enteredAt)})`, inline: false },
+      { name: 'Source', value: record.sourceFile || 'Unknown log file', inline: false },
+    )
+    .setTimestamp(new Date());
+}
+
+function buildQuakeEmbeds(records) {
+  const priorityRecords = records.filter((record) => getClassConfig(record.className || inferClass(record)).priority);
+  const otherRecords = records.filter((record) => !getClassConfig(record.className || inferClass(record)).priority);
+  const ready = records.filter((record) => record.zone && record.zone !== 'Unknown');
+
+  const embed = new EmbedBuilder()
+    .setTitle('Safe Space Mobilization')
+    .setColor(0xff3333)
+    .setDescription('Priority parking snapshot for fast movement.')
+    .addFields(
+      {
+        name: `Priority Classes (${priorityRecords.length})`,
+        value: priorityRecords.length
+          ? priorityRecords.map((record) => `**${botDisplayName(record)}** · ${formatClass(record.className)} · ${compactZone(record.zone)}`).join('\n').slice(0, 1024)
+          : 'None',
+        inline: false,
+      },
+      {
+        name: `Other Parked Bots (${otherRecords.length})`,
+        value: otherRecords.length
+          ? otherRecords.map((record) => `**${botDisplayName(record)}** · ${formatClass(record.className)} · ${compactZone(record.zone)}`).join('\n').slice(0, 1024)
+          : 'None',
+        inline: false,
+      },
+    )
+    .setFooter({ text: `${ready.length}/${records.length} bots have known parking zones` })
+    .setTimestamp(new Date());
+
+  return [embed];
 }
 
 async function sendStatusChannelUpdate() {
@@ -204,7 +294,7 @@ async function sendStatusChannelUpdate() {
   }
 
   const records = await fetchSafeBots();
-  const payload = { embeds: buildBotEmbeds(records, 'Safe Bot Parking Update') };
+  const payload = { embeds: buildRosterEmbeds(records, 'Safe Bot Parking Update') };
   const state = await readStatusMessageState();
   const savedMessageId = state[statusChannelId];
 
@@ -250,17 +340,58 @@ client.once('clientReady', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== 'safebots') return;
+  if (!interaction.isChatInputCommand()) return;
 
   await interaction.deferReply();
 
   try {
-    const className = interaction.options.getString('class');
-    const search = interaction.options.getString('search');
-    const records = filterBots(await fetchSafeBots(), className, search);
-    const title = className ? `Safe Bot Parking · ${formatClass(className)}` : 'Safe Bot Parking';
+    if (['safebots', 'roster', 'bots'].includes(interaction.commandName)) {
+      const className = interaction.options.getString('class');
+      const search = interaction.options.getString('search');
+      const records = filterBots(await fetchSafeBots(), className, search);
+      const title = className ? `Safe Space · ${formatClass(className)} Parking` : 'Safe Space Bot Roster';
 
-    await interaction.editReply({ embeds: buildBotEmbeds(records, title) });
+      await interaction.editReply({ embeds: buildRosterEmbeds(records, title) });
+      return;
+    }
+
+    if (interaction.commandName === 'bot') {
+      const name = interaction.options.getString('name');
+      const query = String(name || '').toLowerCase();
+      const record = (await fetchSafeBots()).find((candidate) => (
+        botDisplayName(candidate).toLowerCase() === query
+        || botDisplayName(candidate).toLowerCase().includes(query)
+      ));
+
+      if (!record) {
+        await interaction.editReply(`No Safe bot matched "${name}".`);
+        return;
+      }
+
+      await interaction.editReply({ embeds: [buildBotDetailEmbed(record)] });
+      return;
+    }
+
+    if (interaction.commandName === 'quake') {
+      await interaction.editReply({ embeds: buildQuakeEmbeds(await fetchSafeBots()) });
+      return;
+    }
+
+    if (interaction.commandName === 'setclass') {
+      const name = interaction.options.getString('name');
+      const className = interaction.options.getString('class');
+      const server = interaction.options.getString('server') || '';
+      const record = await setSafeBotClass(name, className, server);
+      const classLabel = record.classSource === 'manual'
+        ? formatClass(record.className)
+        : `${formatClass(record.className)} (inferred)`;
+
+      await interaction.editReply({
+        content: `Updated **${botDisplayName(record)}** class to **${classLabel}**.`,
+        embeds: [buildBotDetailEmbed(record)],
+      });
+      return;
+    }
   } catch (error) {
     await interaction.editReply(`Could not load Safe bot parking: ${error.message}`);
   }

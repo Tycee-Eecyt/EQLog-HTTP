@@ -9,6 +9,12 @@ const session = require('express-session');
 const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const { MongoClient } = require('mongodb');
+const {
+  CLASS_CONFIG,
+  inferClass,
+  getClassConfig,
+  sortBots,
+} = require('./bot/roster-config');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -64,7 +70,7 @@ async function getDb() {
     throw error;
   }
 
-  if (!mongoClient) {
+  if (!mongoClient || !db) {
     try {
       mongoClient = new MongoClient(MONGODB_URI);
       await mongoClient.connect();
@@ -314,10 +320,23 @@ passport.deserializeUser(async (id, done) => {
 });
 
 function toClientRecord(record) {
+  const className = CLASS_CONFIG[record.classNameOverride] ? record.classNameOverride : inferClass(record);
+  const classConfig = getClassConfig(className);
+
   return {
     character: record.character,
     server: record.server,
     zone: record.zone,
+    className,
+    classLabel: classConfig.label,
+    classAbbreviation: classConfig.abbreviation,
+    classCategory: classConfig.category,
+    classColor: `#${classConfig.color.toString(16).padStart(6, '0')}`,
+    classMarker: classConfig.marker,
+    classSource: record.classNameOverride ? 'manual' : 'inferred',
+    level: Number(record.level || 60),
+    online: Boolean(record.online),
+    ready: Boolean(record.zone && record.zone !== 'Unknown'),
     visibility: record.visibility || (isBotCharacter(record.character) ? 'public' : 'private'),
     isBot: isBotCharacter(record.character),
     enteredAt: record.enteredAt instanceof Date ? record.enteredAt.toISOString() : new Date(record.enteredAt).toISOString(),
@@ -342,7 +361,7 @@ async function getParkedLocations(owner) {
     .sort({ enteredAt: -1, serverKey: 1, characterKey: 1 })
     .toArray();
 
-  return records.map(toClientRecord);
+  return records.map(toClientRecord).sort(sortBots);
 }
 
 async function getPublicBotLocations() {
@@ -355,7 +374,53 @@ async function getPublicBotLocations() {
     .sort({ enteredAt: -1, serverKey: 1, characterKey: 1 })
     .toArray();
 
-  return records.map(toClientRecord);
+  return records.map(toClientRecord).sort(sortBots);
+}
+
+function validateBotClass(className) {
+  const cleanClassName = normalizeKey(className);
+  if (!cleanClassName || cleanClassName === 'unknown') return '';
+  if (CLASS_CONFIG[cleanClassName]) return cleanClassName;
+
+  const error = new Error(`Unknown bot class "${className}".`);
+  error.statusCode = 400;
+  throw error;
+}
+
+async function setPublicBotClass(character, className, server = '') {
+  const collection = await getLocationsCollection();
+  const characterKey = normalizeKey(character);
+  const serverKey = normalizeKey(server);
+  const classNameOverride = validateBotClass(className);
+
+  if (!characterKey) {
+    const error = new Error('character is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await collection.findOneAndUpdate(
+    {
+      visibility: 'public',
+      characterKey,
+      ...(serverKey ? { serverKey } : {}),
+    },
+    classNameOverride
+      ? { $set: { classNameOverride, classUpdatedAt: new Date() } }
+      : { $unset: { classNameOverride: '', classUpdatedAt: '' } },
+    {
+      returnDocument: 'after',
+      sort: { enteredAt: -1 },
+    },
+  );
+
+  if (!result) {
+    const error = new Error('Safe bot record not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return toClientRecord(result);
 }
 
 function validateZoneEntry(entry) {
@@ -662,6 +727,16 @@ app.get('/api/locations', requireAuth, async (req, res, next) => {
 app.get('/api/discord/bots', requireAuthOrDiscordToken, async (req, res, next) => {
   try {
     res.json({ records: await getPublicBotLocations() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/discord/bots/:character/class', requireAuthOrDiscordToken, async (req, res, next) => {
+  try {
+    res.json({
+      record: await setPublicBotClass(req.params.character, req.body.className, req.body.server),
+    });
   } catch (error) {
     next(error);
   }
