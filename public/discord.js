@@ -34,13 +34,20 @@ let scanningLogs = false;
 let scanningInventory = false;
 let autoScanTimer = null;
 let autoScanActive = false;
-const REQUIRED_ITEMS = ['Ring of Shadow', 'Thurg Pot', 'CT Pot', 'WC Cap', 'Reaper'];
+const REQUIRED_ITEMS = ['ring', 'thurg', 'ct', 'wc', 'reaper'];
 const ITEM_LABELS = {
-  'Ring of Shadow': 'Ring',
-  'Thurg Pot': 'Thurg',
-  'CT Pot': 'CT',
-  'WC Cap': 'WC',
-  Reaper: 'Reaper',
+  ring: 'Ring',
+  thurg: 'Thurg',
+  ct: 'CT',
+  wc: 'WC',
+  reaper: 'Reaper',
+};
+const ITEM_MATCHES = {
+  ring: ['Ring of Shadows'],
+  thurg: ['Vial of Velium Vapors'],
+  ct: ['Lizard Blood Potion'],
+  wc: ['Leatherfoot Raider Skullcap'],
+  reaper: ['Reaper of the Dead'],
 };
 const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const DB_NAME = 'eqlog-http';
@@ -409,13 +416,73 @@ function formatAge(value) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function decorateBot(record) {
+function normalizeInventoryKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getInventoryCharacterKey(value) {
+  return normalizeInventoryKey(value).replace(/^safe/, 'safe');
+}
+
+function rowIncludesItem(row, itemName) {
+  const needle = normalizeInventoryKey(itemName);
+  return Object.values(row || {}).some((value) => normalizeInventoryKey(value) === needle);
+}
+
+function getRowQuantity(row) {
+  const quantityEntry = Object.entries(row || {}).find(([key]) => /^(qty|quantity|count)$/i.test(key.trim()));
+  if (!quantityEntry) return 1;
+
+  const quantity = Number(quantityEntry[1]);
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+}
+
+function countRequiredItems(file) {
+  const counts = Object.fromEntries(REQUIRED_ITEMS.map((item) => [item, 0]));
+
+  for (const row of file.rows || []) {
+    for (const item of REQUIRED_ITEMS) {
+      if (ITEM_MATCHES[item].some((name) => rowIncludesItem(row, name))) {
+        counts[item] += getRowQuantity(row);
+      }
+    }
+  }
+
+  return counts;
+}
+
+function mergeItemCounts(left = {}, right = {}) {
+  return Object.fromEntries(REQUIRED_ITEMS.map((item) => [
+    item,
+    Number(left[item] || 0) + Number(right[item] || 0),
+  ]));
+}
+
+async function loadInventoryIndex() {
+  const data = await fetchJson('/api/inventory');
+  const index = new Map();
+
+  for (const file of data.files || []) {
+    const character = file.character || inferInventoryCharacter(file.fileName);
+    const key = getInventoryCharacterKey(character);
+    if (!key) continue;
+
+    index.set(key, mergeItemCounts(index.get(key), countRequiredItems(file)));
+  }
+
+  return index;
+}
+
+function decorateBot(record, inventoryIndex = new Map()) {
+  const inventoryCounts = inventoryIndex.get(getInventoryCharacterKey(record.character));
   return {
     ...record,
     className: record.className || inferClass(record),
     classLabel: record.classLabel || formatClass(record.className || inferClass(record)),
     classAbbreviation: record.classAbbreviation || CLASS_CONFIG[record.className || inferClass(record)]?.abbreviation || 'UNK',
     classCategory: record.classCategory || CLASS_CONFIG[record.className || inferClass(record)]?.category || 'Other',
+    itemStatus: inventoryCounts || record.itemStatus || {},
+    inventoryKnown: Boolean(inventoryCounts),
     ready: Boolean(record.ready || (record.zone && record.zone !== 'Unknown')),
   };
 }
@@ -484,10 +551,13 @@ function renderXpCell(record) {
 function renderInventoryChips(record) {
   const knownItems = record.itemStatus || {};
   return REQUIRED_ITEMS.map((item) => {
-    const hasItem = knownItems[item] === true;
-    const known = Object.prototype.hasOwnProperty.call(knownItems, item);
-    const className = known ? (hasItem ? 'has' : 'missing') : 'unknown';
-    return `<span class="inventory-chip ${className}" title="${escapeHtml(item)}">${escapeHtml(ITEM_LABELS[item] || item)}</span>`;
+    const count = Number(knownItems[item] || 0);
+    const known = record.inventoryKnown || Object.prototype.hasOwnProperty.call(knownItems, item);
+    const className = known ? (count > 0 ? 'has' : 'missing') : 'unknown';
+    const itemNames = ITEM_MATCHES[item].join(', ');
+    const label = `${ITEM_LABELS[item] || item}${known ? ` ${count}` : ''}`;
+    const title = known ? `${itemNames}: ${count}` : `${itemNames}: not scanned`;
+    return `<span class="inventory-chip ${className}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
   }).join('');
 }
 
@@ -518,7 +588,7 @@ function openCharacterModal(record) {
     renderDetailItem('Updated', formatDate(record.enteredAt)),
     renderDetailItem('Class source', record.classSource || 'inferred'),
     renderDetailItem('Ready', record.ready ? 'Ready' : 'Unknown'),
-    renderDetailItem('Inventory', REQUIRED_ITEMS.map((item) => `${ITEM_LABELS[item] || item}: ${record.itemStatus?.[item] === true ? 'Yes' : 'Unknown'}`).join(' | ')),
+    renderDetailItem('Inventory', REQUIRED_ITEMS.map((item) => `${ITEM_LABELS[item] || item}: ${record.inventoryKnown ? Number(record.itemStatus?.[item] || 0) : 'Unknown'}`).join(' | ')),
   ].join('');
 
   if (typeof characterModal.showModal === 'function') {
@@ -564,8 +634,11 @@ async function loadBots({ showLoading = bots.length === 0 } = {}) {
   }
 
   try {
-    const data = await fetchJson('/api/discord/bots');
-    bots = (data.records || []).map(decorateBot).sort(sortBots);
+    const [data, inventoryIndex] = await Promise.all([
+      fetchJson('/api/discord/bots'),
+      loadInventoryIndex().catch(() => new Map()),
+    ]);
+    bots = (data.records || []).map((record) => decorateBot(record, inventoryIndex)).sort(sortBots);
     renderBots();
   } catch (error) {
     if (showLoading) {
@@ -763,6 +836,7 @@ async function scanInventory(items, folderName) {
 
   const scan = await postJson('/api/import-inventory-files', { files: parsedFiles });
   inventoryStatus.textContent = `${folderName}: saved ${scan.files?.length || parsedFiles.length} inventory file(s).`;
+  await loadBots({ showLoading: false });
 }
 
 async function scanSelectedInventory() {
