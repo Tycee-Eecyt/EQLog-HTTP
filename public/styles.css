@@ -630,9 +630,10 @@ td {
 }
 
 .discord-header-tools {
-  display: grid;
-  gap: 14px;
-  justify-items: end;
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .discord-status article {
@@ -715,7 +716,6 @@ td {
 }
 
 .discord-account-card {
-  order: -1;
   display: grid;
   align-content: center;
   gap: 8px;
@@ -1265,7 +1265,8 @@ pre {
   }
 
   .discord-header-tools {
-    justify-items: stretch;
+    align-items: stretch;
+    flex-direction: column;
     width: 100%;
   }
 
