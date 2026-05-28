@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const {
   Client,
   EmbedBuilder,
@@ -11,6 +13,7 @@ const botsUrl = process.env.EQLOG_BOTS_URL || 'http://localhost:3000/api/discord
 const botsToken = process.env.EQLOG_BOTS_TOKEN || process.env.DISCORD_BOT_API_TOKEN;
 const rawStatusChannelId = process.env.DISCORD_STATUS_CHANNEL_ID || '';
 const autoPostMinutes = Number(process.env.DISCORD_AUTO_POST_MINUTES || 0);
+const statusMessageFile = path.join(__dirname, '..', 'data', 'discord-status-message.json');
 
 if (!token) {
   console.error('DISCORD_TOKEN is required to run the Discord bot.');
@@ -36,6 +39,20 @@ function cleanOptionalSnowflake(value, label) {
 
 const statusChannelId = cleanOptionalSnowflake(rawStatusChannelId, 'DISCORD_STATUS_CHANNEL_ID');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+async function readStatusMessageState() {
+  try {
+    return JSON.parse(await fs.readFile(statusMessageFile, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+async function writeStatusMessageState(state) {
+  await fs.mkdir(path.dirname(statusMessageFile), { recursive: true });
+  await fs.writeFile(statusMessageFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
 
 function inferClass(record) {
   const name = String(record.character || '').toLowerCase();
@@ -187,7 +204,26 @@ async function sendStatusChannelUpdate() {
   }
 
   const records = await fetchSafeBots();
-  await channel.send({ embeds: buildBotEmbeds(records, 'Safe Bot Parking Update') });
+  const payload = { embeds: buildBotEmbeds(records, 'Safe Bot Parking Update') };
+  const state = await readStatusMessageState();
+  const savedMessageId = state[statusChannelId];
+
+  if (savedMessageId) {
+    try {
+      const message = await channel.messages.fetch(savedMessageId);
+      await message.edit(payload);
+      return { action: 'edited', messageId: savedMessageId };
+    } catch (error) {
+      if (![10008, 50001, 50013].includes(error.code)) throw error;
+    }
+  }
+
+  const message = await channel.send(payload);
+  await writeStatusMessageState({
+    ...state,
+    [statusChannelId]: message.id,
+  });
+  return { action: 'sent', messageId: message.id };
 }
 
 client.once('clientReady', async () => {
@@ -195,8 +231,8 @@ client.once('clientReady', async () => {
 
   if (statusChannelId) {
     try {
-      await sendStatusChannelUpdate();
-      console.log(`Posted Safe bot status to channel ${statusChannelId}.`);
+      const result = await sendStatusChannelUpdate();
+      console.log(`${result.action === 'edited' ? 'Refreshed' : 'Posted'} Safe bot status message ${result.messageId} in channel ${statusChannelId}.`);
     } catch (error) {
       console.error(error);
     }
