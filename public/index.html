@@ -8,7 +8,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body data-mode="classic">
   <main class="shell">
     <section class="hero">
       <div>
@@ -26,11 +26,11 @@
     </section>
 
     <nav class="mode-toggle" aria-label="Display mode">
-      <a href="/discord">
+      <a href="/discord" data-mode-link="modern">
         <span>Modern</span>
         <small>Discord dashboard</small>
       </a>
-      <a href="/parked" aria-current="page">
+      <a href="/parked" data-mode-link="classic" aria-current="page">
         <span>Classic</span>
         <small>Parked + inventory</small>
       </a>
@@ -135,6 +135,7 @@
   </main>
 
   <script src="/offline-store.js"></script>
+  <script src="/mode-preference.js"></script>
   <script src="/pwa.js"></script>
   <script src="/app.js"></script>
 </body>

@@ -631,6 +631,18 @@ function wantsJson(req) {
   return req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
 }
 
+function getCookieValue(req, name) {
+  const cookies = String(req.headers.cookie || '').split(';');
+  const prefix = `${name}=`;
+  const match = cookies.map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(prefix));
+  return match ? decodeURIComponent(match.slice(prefix.length)) : '';
+}
+
+function getPreferredMode(req) {
+  const mode = getCookieValue(req, 'eqlog-mode');
+  return mode === 'classic' ? 'classic' : 'modern';
+}
+
 function requireAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
 
@@ -818,7 +830,7 @@ app.get('/discord.html', requireAuth, (req, res) => {
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
 app.get('/', requireAuth, (req, res) => {
-  res.redirect('/discord');
+  res.redirect(getPreferredMode(req) === 'classic' ? '/parked' : '/discord');
 });
 
 app.use((req, res) => {

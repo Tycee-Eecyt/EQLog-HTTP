@@ -8,7 +8,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css?v=discord-dashboard-20260528g">
 </head>
-<body class="discord-page">
+<body class="discord-page" data-mode="modern">
   <main class="discord-shell">
     <header class="discord-header">
       <div class="safe-brand">
@@ -45,8 +45,8 @@
     </header>
 
     <nav class="discord-tabs" aria-label="Display mode">
-      <a href="/parked">Classic</a>
-      <a href="/discord" aria-current="page">Modern</a>
+      <a href="/parked" data-mode-link="classic">Classic</a>
+      <a href="/discord" data-mode-link="modern" aria-current="page">Modern</a>
     </nav>
 
     <section class="discord-ops" aria-label="Scanner shortcuts">
@@ -128,6 +128,7 @@
     </div>
   </dialog>
 
+  <script src="/mode-preference.js"></script>
   <script src="/pwa.js"></script>
   <script src="/discord.js?v=discord-dashboard-20260528h"></script>
 </body>
