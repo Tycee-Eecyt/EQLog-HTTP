@@ -829,6 +829,7 @@ async function scanInventory(items, folderName) {
     parsedFiles.push({
       fileName: sourceFile,
       character: inferInventoryCharacter(file.name),
+      fileModifiedAt: file.lastModified ? new Date(file.lastModified).toISOString() : '',
       headers: parsed.headers,
       rows: parsed.rows,
     });

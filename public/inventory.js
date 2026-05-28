@@ -293,7 +293,7 @@ function renderInventory(files) {
       <details class="inventory-file" ${index === 0 ? 'open' : ''}>
         <summary>
           <span><strong>${escapeHtml(file.character || 'Unknown character')}</strong> ${escapeHtml(file.fileName)}</span>
-          <span>${Number(file.rowCount || rows.length)} rows &middot; ${escapeHtml(formatDate(file.scannedAt))}</span>
+          <span>${Number(file.rowCount || rows.length)} rows &middot; modified ${escapeHtml(formatDate(file.fileModifiedAt))} &middot; scanned ${escapeHtml(formatDate(file.scannedAt))}</span>
         </summary>
         ${table}
         ${truncated}
@@ -407,6 +407,7 @@ form.addEventListener('submit', async (event) => {
       files.push({
         fileName: sourceFile,
         character: inferCharacter(file.name),
+        fileModifiedAt: file.lastModified ? new Date(file.lastModified).toISOString() : '',
         headers: parsed.headers,
         rows: parsed.rows,
       });

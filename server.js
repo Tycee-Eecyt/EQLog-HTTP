@@ -521,6 +521,7 @@ function toClientInventoryFile(record) {
     headers: Array.isArray(record.headers) ? record.headers : [],
     rows: Array.isArray(record.rows) ? record.rows : [],
     rowCount: Number(record.rowCount || 0),
+    fileModifiedAt: record.fileModifiedAt instanceof Date ? record.fileModifiedAt.toISOString() : (record.fileModifiedAt ? new Date(record.fileModifiedAt).toISOString() : ''),
     scannedAt: record.scannedAt instanceof Date ? record.scannedAt.toISOString() : new Date(record.scannedAt).toISOString(),
   };
 }
@@ -575,38 +576,52 @@ async function importInventoryFiles(owner, files) {
 
     const character = String(file.character || inferInventoryCharacter(fileName)).trim();
     const fileKey = normalizeKey(fileName);
+    const fileModifiedMs = Date.parse(file.fileModifiedAt);
+    const fileModifiedAt = Number.isNaN(fileModifiedMs) ? null : new Date(fileModifiedMs);
     const scannedAt = new Date();
+    const previous = await collection.findOne({ owner, fileKey });
+    const previousModifiedMs = previous?.fileModifiedAt ? new Date(previous.fileModifiedAt).getTime() : null;
+    const shouldUpdate = !previous
+      || !fileModifiedAt
+      || !Number.isFinite(previousModifiedMs)
+      || fileModifiedAt.getTime() >= previousModifiedMs;
 
-    await collection.updateOne(
-      { owner, fileKey },
-      {
-        $set: {
-          owner,
-          fileKey,
-          fileName,
-          character,
-          characterKey: normalizeKey(character),
-          headers,
-          rows,
-          rowCount: rows.length,
-          scannedAt,
+    if (shouldUpdate) {
+      await collection.updateOne(
+        { owner, fileKey },
+        {
+          $set: {
+            owner,
+            fileKey,
+            fileName,
+            character,
+            characterKey: normalizeKey(character),
+            headers,
+            rows,
+            rowCount: rows.length,
+            ...(fileModifiedAt ? { fileModifiedAt } : {}),
+            scannedAt,
+          },
         },
-      },
-      { upsert: true },
-    );
+        { upsert: true },
+      );
+    }
 
     results.push({
       fileName,
       character,
       rowCount: rows.length,
-      status: 'updated',
+      status: shouldUpdate ? 'updated' : 'kept-existing',
+      fileModifiedAt: fileModifiedAt ? fileModifiedAt.toISOString() : '',
+      previousFileModifiedAt: previous?.fileModifiedAt ? new Date(previous.fileModifiedAt).toISOString() : '',
       scannedAt: scannedAt.toISOString(),
     });
   }
 
   return {
     scannedFiles: files.length,
-    changed: results.length,
+    changed: results.filter((result) => result.status === 'updated').length,
+    unchanged: results.filter((result) => result.status === 'kept-existing').length,
     results,
     files: await getInventoryFiles(owner),
   };
