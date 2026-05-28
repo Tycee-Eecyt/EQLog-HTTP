@@ -6,7 +6,7 @@
   <title>Discord Dashboard | EQLog HTTP</title>
   <meta name="theme-color" content="#080b12">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=discord-dashboard-20260528f">
 </head>
 <body class="discord-page">
   <main class="discord-shell">
@@ -18,48 +18,82 @@
           <p>Project 1999 · Bot Roster v1.0</p>
         </div>
       </div>
-      <div class="discord-status">
-        <article>
-          <strong id="discord-bot-count">0</strong>
-          <span>Bots</span>
-        </article>
-        <article>
-          <strong id="discord-zone-count">0</strong>
-          <span>Zones</span>
-        </article>
-        <article>
-          <strong id="discord-ready-count">0</strong>
-          <span>Ready</span>
-        </article>
-        <span class="live-pill"><span></span>Live</span>
+      <div class="discord-header-tools">
+        <div class="discord-status">
+          <article>
+            <strong id="discord-bot-count">0</strong>
+            <span>Bots</span>
+          </article>
+          <article>
+            <strong id="discord-zone-count">0</strong>
+            <span>Zones</span>
+          </article>
+          <article>
+            <strong id="discord-ready-count">0</strong>
+            <span>Ready</span>
+          </article>
+          <span class="live-pill"><span></span>Live</span>
+        </div>
+        <div class="discord-account-card">
+          <span>Signed in</span>
+          <strong id="current-user">Loading...</strong>
+          <form action="/logout" method="post" class="logout-form">
+            <button type="submit" class="ghost compact">Logout</button>
+          </form>
+        </div>
       </div>
     </header>
 
-    <nav class="page-tabs discord-tabs" aria-label="Pages">
-      <a href="/">
-        <span>Parked</span>
-        <small>Zone locations</small>
-      </a>
-      <a href="/inventory">
-        <span>Inventory</span>
-        <small>Item files</small>
-      </a>
-      <a href="/discord" aria-current="page">
-        <span>Discord</span>
-        <small>Bot dashboard</small>
-      </a>
+    <nav class="discord-tabs" aria-label="Pages">
+      <a href="/">Parked</a>
+      <a href="/inventory">Inventory</a>
+      <a href="/discord" aria-current="page">Discord</a>
     </nav>
 
+    <section class="discord-ops" aria-label="Scanner shortcuts">
+      <article class="discord-op-card">
+        <div>
+          <h2>EverQuest Logs folder</h2>
+          <p>Scan parked locations from <code>eqlog_Character_server.txt</code>. Safe* characters feed this roster and Discord updates.</p>
+        </div>
+        <div class="discord-op-actions">
+          <button id="discord-logs-button" type="button" class="discord-action primary">Choose Logs Folder</button>
+          <button id="discord-logs-scan-button" type="button" class="discord-action" disabled>Scan Logs</button>
+          <input id="discord-logs-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
+          <label class="discord-inline-field" for="discord-scan-interval">Auto-scan minutes</label>
+          <input id="discord-scan-interval" type="number" min="1" max="60" step="1" value="5">
+          <button id="discord-auto-scan-button" type="button" class="discord-action" disabled>Start Auto-Scan</button>
+          <label class="discord-inline-field" for="discord-timezone">Timezone</label>
+          <input id="discord-timezone" type="text" autocomplete="off" spellcheck="false" placeholder="America/New_York">
+          <button id="discord-use-local-timezone" type="button" class="discord-action">Use Local</button>
+          <span id="discord-logs-status">No folder selected.</span>
+        </div>
+      </article>
+
+      <article class="discord-op-card">
+        <div>
+          <h2>EverQuest root folder</h2>
+          <p>Scan <code>Character-Inventory*.txt</code> files after generating them in game.</p>
+          <p class="discord-command">/outputfile inventory</p>
+        </div>
+        <div class="discord-op-actions">
+          <button id="discord-inventory-button" type="button" class="discord-action">Choose Root Folder</button>
+          <button id="discord-inventory-scan-button" type="button" class="discord-action" disabled>Scan Inventory</button>
+          <input id="discord-inventory-picker" class="hidden-input" type="file" webkitdirectory directory multiple>
+          <span>Manual scan only</span>
+          <span>Inventory files stay separate</span>
+          <span id="discord-inventory-status">No folder selected.</span>
+        </div>
+      </article>
+    </section>
+
     <section class="discord-controls" aria-label="Dashboard controls">
-      <input id="discord-search" type="search" autocomplete="off" placeholder="Search name, zone, server...">
+      <input id="discord-search" type="search" autocomplete="off" placeholder="Search name, zone, etc.">
       <div class="class-filter" aria-label="Class filter">
         <span>Class:</span>
         <div id="class-filter-buttons" class="class-filter-buttons"></div>
       </div>
-      <button id="discord-refresh" type="button">Refresh</button>
     </section>
-
-    <section id="class-legend" class="class-legend" aria-label="Class legend"></section>
 
     <section class="discord-table-panel">
       <div class="discord-table-wrap">
@@ -68,22 +102,34 @@
             <tr>
               <th>Character</th>
               <th>Class</th>
-              <th>Server</th>
+              <th>Lvl</th>
               <th>Zone</th>
-              <th>Status</th>
+              <th>Inventory</th>
               <th>Parked</th>
-              <th>Updated</th>
             </tr>
           </thead>
           <tbody id="discord-bots-body">
-            <tr><td colspan="7" class="empty">Loading Safe bot roster...</td></tr>
+            <tr><td colspan="6" class="empty">Loading Safe bot roster...</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
 
+  <dialog id="character-modal" class="character-modal">
+    <div class="character-modal-shell">
+      <header>
+        <div>
+          <p class="eyebrow">Character details</p>
+          <h2 id="modal-character-name">Unknown</h2>
+        </div>
+        <button id="modal-close" type="button" class="discord-action">Close</button>
+      </header>
+      <div id="modal-character-details" class="character-detail-grid"></div>
+    </div>
+  </dialog>
+
   <script src="/pwa.js"></script>
-  <script src="/discord.js"></script>
+  <script src="/discord.js?v=discord-dashboard-20260528f"></script>
 </body>
 </html>
