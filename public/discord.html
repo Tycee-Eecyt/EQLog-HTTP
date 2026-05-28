@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Discord Dashboard | EQLog HTTP</title>
+  <meta name="theme-color" content="#080b12">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="discord-page">
+  <main class="discord-shell">
+    <header class="discord-header">
+      <div class="safe-brand">
+        <span class="brand-mark" aria-hidden="true">X</span>
+        <div>
+          <h1>Safe Space</h1>
+          <p>Project 1999 · Bot Roster v1.0</p>
+        </div>
+      </div>
+      <div class="discord-status">
+        <article>
+          <strong id="discord-bot-count">0</strong>
+          <span>Bots</span>
+        </article>
+        <article>
+          <strong id="discord-zone-count">0</strong>
+          <span>Zones</span>
+        </article>
+        <article>
+          <strong id="discord-ready-count">0</strong>
+          <span>Ready</span>
+        </article>
+        <span class="live-pill"><span></span>Live</span>
+      </div>
+    </header>
+
+    <nav class="page-tabs discord-tabs" aria-label="Pages">
+      <a href="/">
+        <span>Parked</span>
+        <small>Zone locations</small>
+      </a>
+      <a href="/inventory">
+        <span>Inventory</span>
+        <small>Item files</small>
+      </a>
+      <a href="/discord" aria-current="page">
+        <span>Discord</span>
+        <small>Bot dashboard</small>
+      </a>
+    </nav>
+
+    <section class="discord-controls" aria-label="Dashboard controls">
+      <input id="discord-search" type="search" autocomplete="off" placeholder="Search name, zone, server...">
+      <div class="class-filter" aria-label="Class filter">
+        <span>Class:</span>
+        <button type="button" class="active" data-class="all">All</button>
+        <button type="button" data-class="cleric">Cleric</button>
+        <button type="button" data-class="wizard">Wizard</button>
+        <button type="button" data-class="warrior">Warrior</button>
+        <button type="button" data-class="magician">Mage</button>
+        <button type="button" data-class="druid">Druid</button>
+        <button type="button" data-class="shaman">Shaman</button>
+      </div>
+      <button id="discord-refresh" type="button">Refresh</button>
+    </section>
+
+    <section class="class-legend" aria-label="Class legend">
+      <span class="class-chip cleric">Cleric</span>
+      <span class="class-chip wizard">Wizard</span>
+      <span class="class-chip warrior">Warrior</span>
+      <span class="class-chip magician">Magician</span>
+      <span class="class-chip ranger">Ranger</span>
+      <span class="class-chip paladin">Paladin</span>
+      <span class="class-chip druid">Druid</span>
+      <span class="class-chip shaman">Shaman</span>
+      <span class="class-chip shadow-knight">Shadow Knight</span>
+      <span class="class-chip necromancer">Necromancer</span>
+    </section>
+
+    <section class="discord-table-panel">
+      <div class="discord-table-wrap">
+        <table class="discord-table">
+          <thead>
+            <tr>
+              <th>Character</th>
+              <th>Class</th>
+              <th>Server</th>
+              <th>Zone</th>
+              <th>Parked</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="discord-bots-body">
+            <tr><td colspan="6" class="empty">Loading Safe bot roster...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/pwa.js"></script>
+  <script src="/discord.js"></script>
+</body>
+</html>

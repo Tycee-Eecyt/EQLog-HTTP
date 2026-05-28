@@ -14,6 +14,7 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || 'eqlog';
+const DISCORD_BOT_API_TOKEN = process.env.DISCORD_BOT_API_TOKEN || '';
 const SESSION_SECRET_FILE = path.join(__dirname, 'data', 'session-secret');
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 30;
@@ -344,6 +345,19 @@ async function getParkedLocations(owner) {
   return records.map(toClientRecord);
 }
 
+async function getPublicBotLocations() {
+  const collection = await getLocationsCollection();
+  const records = await collection
+    .find({
+      visibility: 'public',
+      characterKey: /^safe/,
+    })
+    .sort({ enteredAt: -1, serverKey: 1, characterKey: 1 })
+    .toArray();
+
+  return records.map(toClientRecord);
+}
+
 function validateZoneEntry(entry) {
   const enteredAtMs = Date.parse(entry.enteredAt);
   if (!entry.character || !entry.server || !entry.zone || Number.isNaN(enteredAtMs)) {
@@ -548,6 +562,24 @@ function requireAuth(req, res, next) {
   res.redirect('/login');
 }
 
+function hasDiscordBotToken(req) {
+  if (!DISCORD_BOT_API_TOKEN) return false;
+
+  const authHeader = String(req.headers.authorization || '');
+  const [, token] = authHeader.match(/^Bearer\s+(.+)$/i) || [];
+  if (!token) return false;
+
+  const candidate = Buffer.from(token);
+  const expected = Buffer.from(DISCORD_BOT_API_TOKEN);
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+}
+
+function requireAuthOrDiscordToken(req, res, next) {
+  if (req.isAuthenticated() || hasDiscordBotToken(req)) return next();
+
+  res.status(401).json({ error: 'Authentication required.' });
+}
+
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
@@ -627,6 +659,14 @@ app.get('/api/locations', requireAuth, async (req, res, next) => {
   }
 });
 
+app.get('/api/discord/bots', requireAuthOrDiscordToken, async (req, res, next) => {
+  try {
+    res.json({ records: await getPublicBotLocations() });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/import-zone-entries', requireAuth, async (req, res, next) => {
   try {
     const scan = await importZoneEntries(req.user.id, req.body.entries, {
@@ -667,6 +707,14 @@ app.get('/inventory', requireAuth, (req, res) => {
 
 app.get('/inventory.html', requireAuth, (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'inventory.html'));
+});
+
+app.get('/discord', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'discord.html'));
+});
+
+app.get('/discord.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'discord.html'));
 });
 
 app.use(express.static(PUBLIC_DIR, { index: false }));

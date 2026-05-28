@@ -19,6 +19,14 @@ MONGODB_URI=your MongoDB Atlas connection string
 MONGODB_DB=eqlog
 SESSION_SECRET=a long random string
 COOKIE_SECURE=false
+DISCORD_BOT_API_TOKEN=optional long random token for Discord bot reads
+DISCORD_TOKEN=optional Discord bot token
+DISCORD_CLIENT_ID=optional Discord application client id
+DISCORD_GUILD_ID=optional Discord test server id
+DISCORD_STATUS_CHANNEL_ID=optional Discord channel id for automatic posts
+DISCORD_AUTO_POST_MINUTES=0
+EQLOG_BOTS_URL=http://localhost:3000/api/discord/bots
+EQLOG_BOTS_TOKEN=same value as DISCORD_BOT_API_TOKEN
 ```
 
 Run:
@@ -57,6 +65,7 @@ MONGODB_URI=mongodb+srv://...
 MONGODB_DB=eqlog
 SESSION_SECRET=<long random value>
 COOKIE_SECURE=false
+DISCORD_BOT_API_TOKEN=<long random value>
 ```
 
 You can also use `render.yaml` as a Blueprint and fill in the secret values in Render.
@@ -119,5 +128,57 @@ Names starting with `Safe` are treated as bots:
 - `My Characters` shows only your non-bot characters.
 - `Bots` shows public shared bots.
 
+## Discord Dashboard
 
+Open `/discord` after signing in to view the Safe bot dashboard. It shows only public bot records, meaning characters whose names start with `Safe`, and highlights where each bot was last parked.
 
+Discord apps can read the same bot-only data from:
+
+```text
+GET /api/discord/bots
+Authorization: Bearer <DISCORD_BOT_API_TOKEN>
+```
+
+If `DISCORD_BOT_API_TOKEN` is not configured, the endpoint still works for signed-in browser sessions but rejects bearer-token access.
+
+## Discord Bot
+
+The included Discord bot adds a `/safebots` slash command that posts the Safe bot parking list into the Discord channel where the command is used.
+
+Create a Discord application at the Discord Developer Portal, add a bot user, copy its token, then invite it to your server with the `applications.commands` and `bot` scopes. The bot only needs permission to send messages and embed links.
+
+Set these values in `.env`:
+
+```text
+DISCORD_TOKEN=<Discord bot token>
+DISCORD_CLIENT_ID=<Discord application client id>
+DISCORD_GUILD_ID=<server id for fast command registration>
+DISCORD_BOT_API_TOKEN=<long random API token>
+EQLOG_BOTS_TOKEN=<same value as DISCORD_BOT_API_TOKEN>
+EQLOG_BOTS_URL=https://your-eqlog-site.com/api/discord/bots
+```
+
+Register the command:
+
+```powershell
+npm run discord:register
+```
+
+Run the bot:
+
+```powershell
+npm run discord:bot
+```
+
+Use `/safebots` in a Discord channel. Optional filters are available for class and search text.
+
+In production, run the web app and Discord bot as separate processes. For example, keep the Render web service start command as `npm start`, then add a Render Background Worker with start command `npm run discord:bot` using the same Discord and EQLog API environment variables.
+
+For automatic channel posts, set:
+
+```text
+DISCORD_STATUS_CHANNEL_ID=<channel id>
+DISCORD_AUTO_POST_MINUTES=60
+```
+
+When `DISCORD_STATUS_CHANNEL_ID` is set, the bot posts once when it starts. If `DISCORD_AUTO_POST_MINUTES` is greater than `0`, it repeats at that interval.

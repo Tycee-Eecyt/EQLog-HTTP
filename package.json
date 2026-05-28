@@ -4,12 +4,15 @@
   "private": true,
   "description": "Hosted EverQuest log folder scanner that tracks the most recent parked zone per character.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "discord:register": "node bot/register-commands.js",
+    "discord:bot": "node bot/discord-bot.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "discord.js": "^14.26.4",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-session": "^1.18.0",
