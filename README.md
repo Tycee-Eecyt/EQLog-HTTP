@@ -178,6 +178,17 @@ npm run discord:bot
 
 Use `/safebots` or `/roster` in a Discord channel. Optional filters are available for class and search text. `/bots` lists one class, `/bot` shows a single Safe bot detail card, `/setclass` manually assigns a class to a Safe bot, and `/quake` posts a priority parking snapshot for quick mobilization.
 
+### Discord Commands
+
+| Command | What it does |
+| --- | --- |
+| `/safebots [class] [search]` | Shows the Safe bot parking roster, grouped by class. Use `class` to narrow to one class or `search` to filter by character, server, or zone. |
+| `/roster [class] [search]` | Alias-style roster view for the same Safe Space bot list and filters as `/safebots`. |
+| `/bots class:<class>` | Lists Safe bots for one required class. |
+| `/bot name:<safe-bot>` | Shows a detail card for one Safe bot, including class, zone, server, parked time, and source log file. |
+| `/quake` | Posts a parking readiness summary that highlights priority classes separately from other parked bots. |
+| `/setclass name:<safe-bot> class:<class> [server]` | Manually assigns a class to a Safe bot. Choose `Unknown` to clear the manual override and return to name-based inference. Use `server` if multiple records share the same bot name. |
+
 Classes are inferred from Safe bot names by default. To override an inferred class, run:
 
 ```text
