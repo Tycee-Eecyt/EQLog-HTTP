@@ -286,13 +286,104 @@ button.compact {
   font-weight: 800;
 }
 
+.auth-page .login-shell {
+  width: min(560px, calc(100% - 32px));
+}
+
+.auth-page .login-panel {
+  width: 100%;
+  border: 1px solid rgba(105, 119, 177, 0.32);
+  border-radius: 4px;
+  padding: clamp(22px, 4vw, 34px);
+  background:
+    linear-gradient(180deg, rgba(16, 20, 33, 0.98), rgba(7, 9, 17, 0.98));
+}
+
+.auth-brand {
+  align-items: flex-start;
+}
+
+.auth-page .eyebrow {
+  color: #30ff8c;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  letter-spacing: 0.16em;
+}
+
+.auth-page .login-panel h1 {
+  max-width: none;
+  color: #ffbf22;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.2rem, 8vw, 3.5rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0 22px rgba(255, 191, 34, 0.45);
+}
+
+.auth-page .lede,
+.auth-page .auth-switch {
+  color: #8d96bd;
+}
+
+.auth-page .login-form label {
+  color: #737b9d;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-page .login-form input {
+  border-radius: 4px;
+  color: #dce4ff;
+  border-color: rgba(114, 126, 184, 0.6);
+  background: #070911;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+}
+
+.auth-page .login-form input:focus {
+  border-color: #ffbf22;
+  box-shadow: 0 0 0 3px rgba(255, 191, 34, 0.16);
+}
+
+.auth-page .login-form button {
+  min-height: 46px;
+  border: 1px solid #ffbf22;
+  border-radius: 4px;
+  color: #0c0f16;
+  background: #ffbf22;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.auth-page .auth-switch a {
+  color: #30ff8c;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+.auth-page .status {
+  color: #ff7669;
+  border-left-color: #ff493d;
+  background: rgba(111, 22, 18, 0.34);
+}
+
+.mode-toggle,
 .page-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin: 0 0 22px;
 }
 
+.mode-toggle {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.page-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mode-toggle a,
 .page-tabs a {
   display: flex;
   min-height: 86px;
@@ -308,6 +399,12 @@ button.compact {
   text-decoration: none;
 }
 
+.mode-toggle a {
+  min-height: 74px;
+  border-radius: 18px;
+}
+
+.mode-toggle a[aria-current='page'],
 .page-tabs a[aria-current='page'] {
   color: #fffdf5;
   border-color: rgba(36, 75, 53, 0.3);
@@ -317,11 +414,13 @@ button.compact {
   box-shadow: 0 18px 50px rgba(36, 75, 53, 0.28);
 }
 
+.mode-toggle span,
 .page-tabs span {
   font-size: 1.28rem;
   font-weight: 900;
 }
 
+.mode-toggle small,
 .page-tabs small {
   margin-top: 4px;
   color: currentColor;
@@ -695,6 +794,17 @@ td {
 
 .discord-tabs a[aria-current='page'] {
   color: #ffbf22;
+}
+
+.discord-tabs a {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.discord-tabs a[aria-current='page'] {
+  border-color: rgba(255, 191, 34, 0.4);
+  background: rgba(255, 191, 34, 0.08);
 }
 
 .discord-ops {
@@ -1223,6 +1333,7 @@ pre {
   }
 
   .hero,
+  .mode-toggle,
   .page-tabs,
   .scan-panel,
   .stats {

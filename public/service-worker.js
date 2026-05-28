@@ -1,13 +1,17 @@
-const CACHE_NAME = 'eqlog-http-v2';
+const CACHE_NAME = 'eqlog-http-v3';
 const APP_SHELL = [
   '/',
+  '/parked',
   '/index.html',
+  '/discord',
+  '/discord.html',
   '/inventory',
   '/inventory.html',
   '/login',
   '/register',
   '/styles.css',
   '/app.js',
+  '/discord.js',
   '/inventory.js',
   '/offline-store.js',
   '/pwa.js',

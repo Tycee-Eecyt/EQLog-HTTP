@@ -25,18 +25,25 @@
       </div>
     </section>
 
-    <nav class="page-tabs" aria-label="Pages">
-      <a href="/" aria-current="page">
+    <nav class="mode-toggle" aria-label="Display mode">
+      <a href="/discord">
+        <span>Modern</span>
+        <small>Discord dashboard</small>
+      </a>
+      <a href="/parked" aria-current="page">
+        <span>Classic</span>
+        <small>Parked + inventory</small>
+      </a>
+    </nav>
+
+    <nav class="page-tabs classic-tabs" aria-label="Classic pages">
+      <a href="/parked" aria-current="page">
         <span>Parked</span>
         <small>Zone locations</small>
       </a>
       <a href="/inventory">
         <span>Inventory</span>
         <small>Item files</small>
-      </a>
-      <a href="/discord">
-        <span>Discord</span>
-        <small>Bot dashboard</small>
       </a>
     </nav>
 

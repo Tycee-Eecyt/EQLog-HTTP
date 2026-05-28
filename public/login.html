@@ -4,15 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Login | EQLog HTTP</title>
-  <meta name="theme-color" content="#244b35">
+  <meta name="theme-color" content="#03050a">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="discord-page auth-page">
   <main class="login-shell">
-    <section class="panel login-panel">
-      <p class="eyebrow">Private access</p>
-      <h1>EQLog HTTP</h1>
+    <section class="login-panel">
+      <div class="safe-brand auth-brand">
+        <span class="brand-mark" aria-hidden="true">X</span>
+        <div>
+          <p class="eyebrow">Private access</p>
+          <h1>EQLog HTTP</h1>
+        </div>
+      </div>
       <p class="lede">Sign in to scan logs and sync parked locations to MongoDB.</p>
 
       <form action="/login" method="post" class="login-form">

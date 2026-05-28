@@ -776,6 +776,14 @@ app.get('/index.html', requireAuth, (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
+app.get('/parked', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
+app.get('/parked.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
 app.get('/inventory', requireAuth, (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'inventory.html'));
 });
@@ -795,7 +803,7 @@ app.get('/discord.html', requireAuth, (req, res) => {
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
 app.get('/', requireAuth, (req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  res.redirect('/discord');
 });
 
 app.use((req, res) => {

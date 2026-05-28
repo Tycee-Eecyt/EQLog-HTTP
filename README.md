@@ -47,6 +47,8 @@ Open:
 http://localhost:3000
 ```
 
+The default route opens the modern Discord-style dashboard. Use `/parked` and `/inventory` for the classic parked-location and inventory pages.
+
 Create an account from `/register`, then sign in from `/login`. Usernames and salted password hashes are stored in the MongoDB `users` collection.
 
 ## Render Setup
