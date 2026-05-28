@@ -558,15 +558,21 @@ function renderBots() {
   `).join('');
 }
 
-async function loadBots() {
-  body.innerHTML = '<tr><td colspan="6" class="empty">Loading Safe bot roster...</td></tr>';
+async function loadBots({ showLoading = bots.length === 0 } = {}) {
+  if (showLoading) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">Loading Safe bot roster...</td></tr>';
+  }
 
   try {
     const data = await fetchJson('/api/discord/bots');
     bots = (data.records || []).map(decorateBot).sort(sortBots);
     renderBots();
   } catch (error) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message)}</td></tr>`;
+    if (showLoading) {
+      body.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message)}</td></tr>`;
+    } else {
+      logsStatus.textContent = `Roster refresh failed: ${error.message}`;
+    }
   }
 }
 
@@ -679,7 +685,7 @@ async function scanLogs(items, folderName) {
   });
 
   logsStatus.textContent = `${folderName}: scanned ${scan.scannedFiles}; updated ${scan.changed}; kept ${scan.unchanged}.`;
-  await loadBots();
+  await loadBots({ showLoading: false });
 }
 
 async function scanSelectedLogs() {
