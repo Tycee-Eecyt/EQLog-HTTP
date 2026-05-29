@@ -561,6 +561,17 @@ function renderInventoryChips(record) {
   }).join('');
 }
 
+function renderRechargeCell(record, index) {
+  const label = record.rechargedAt ? formatAge(record.rechargedAt) : 'Never';
+  const title = record.rechargedAt ? formatDate(record.rechargedAt) : 'No recharge timestamp saved';
+  return `
+    <span class="recharge-cell">
+      <button type="button" class="recharge-button" data-recharge-index="${index}">Recharge</button>
+      <span title="${escapeHtml(title)}">${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
 function detailValue(value) {
   return value === undefined || value === null || value === '' ? 'Unknown' : value;
 }
@@ -585,6 +596,7 @@ function openCharacterModal(record) {
     renderDetailItem('Zone', record.zone),
     renderDetailItem('Server', record.server),
     renderDetailItem('Parked', formatAge(record.enteredAt)),
+    renderDetailItem('Recharged', record.rechargedAt ? `${formatAge(record.rechargedAt)} (${formatDate(record.rechargedAt)})` : 'Never'),
     renderDetailItem('Updated', formatDate(record.enteredAt)),
     renderDetailItem('Class source', record.classSource || 'inferred'),
     renderDetailItem('Ready', record.ready ? 'Ready' : 'Unknown'),
@@ -612,7 +624,7 @@ function renderBots() {
 
   const filteredBots = getFilteredBots();
   if (!filteredBots.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">No Safe bots match this view.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty">No Safe bots match this view.</td></tr>';
     return;
   }
 
@@ -623,6 +635,7 @@ function renderBots() {
       <td><strong class="level-cell">${escapeHtml(record.level || 60)}</strong></td>
       <td><span class="zone-pill">${escapeHtml(record.zone || 'Unknown')}</span></td>
       <td><span class="inventory-list">${renderInventoryChips(record)}</span></td>
+      <td>${renderRechargeCell(record, index)}</td>
       <td>${escapeHtml(formatAge(record.enteredAt) || 'Unknown')}</td>
     </tr>
   `).join('');
@@ -630,7 +643,7 @@ function renderBots() {
 
 async function loadBots({ showLoading = bots.length === 0 } = {}) {
   if (showLoading) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">Loading Safe bot roster...</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty">Loading Safe bot roster...</td></tr>';
   }
 
   try {
@@ -642,11 +655,35 @@ async function loadBots({ showLoading = bots.length === 0 } = {}) {
     renderBots();
   } catch (error) {
     if (showLoading) {
-      body.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message)}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(error.message)}</td></tr>`;
     } else {
       logsStatus.textContent = `Roster refresh failed: ${error.message}`;
     }
   }
+}
+
+async function rechargeBot(record) {
+  if (!record?.character) return;
+
+  const data = await postJson(`/api/discord/bots/${encodeURIComponent(record.character)}/recharge`, {
+    server: record.server || '',
+  });
+  const updated = decorateBot(data.record || record);
+  const index = bots.findIndex((candidate) => (
+    String(candidate.character || '').toLowerCase() === String(updated.character || '').toLowerCase()
+    && String(candidate.server || '').toLowerCase() === String(updated.server || '').toLowerCase()
+  ));
+
+  if (index >= 0) {
+    bots[index] = {
+      ...bots[index],
+      ...updated,
+      itemStatus: bots[index].itemStatus,
+      inventoryKnown: bots[index].inventoryKnown,
+    };
+  }
+
+  renderBots();
 }
 
 async function getLogFilesFromDirectory(directoryHandle) {
@@ -873,6 +910,18 @@ async function scanSelectedInventory() {
 searchInput.addEventListener('input', renderBots);
 
 body.addEventListener('click', (event) => {
+  const rechargeButton = event.target.closest('.recharge-button');
+  if (rechargeButton) {
+    const record = getFilteredBots()[Number(rechargeButton.dataset.rechargeIndex)];
+    rechargeButton.disabled = true;
+    rechargeBot(record).catch((error) => {
+      logsStatus.textContent = `Recharge update failed: ${error.message}`;
+    }).finally(() => {
+      rechargeButton.disabled = false;
+    });
+    return;
+  }
+
   const button = event.target.closest('.character-detail-button');
   if (!button) return;
 

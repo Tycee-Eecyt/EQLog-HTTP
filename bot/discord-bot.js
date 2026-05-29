@@ -4,6 +4,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { MongoClient } = require('mongodb');
 const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
@@ -275,6 +278,36 @@ async function setSafeBotClass(name, className, server = '') {
   };
 }
 
+async function setSafeBotRecharge(name, server = '') {
+  const rechargeUrl = `${botsUrl.replace(/\/$/, '')}/${encodeURIComponent(name)}/recharge`;
+  let response;
+
+  try {
+    response = await fetch(rechargeUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${botsToken}`,
+      },
+      body: JSON.stringify({ server }),
+    });
+  } catch (error) {
+    throw new Error(`Could not reach EQLog API at ${rechargeUrl}.`);
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`EQLog API returned ${response.status}: ${body}`);
+  }
+
+  const data = await response.json();
+  return {
+    ...data.record,
+    className: data.record?.className || inferClass(data.record || {}),
+  };
+}
+
 function filterBots(records, className, search) {
   const query = String(search || '').trim().toLowerCase();
 
@@ -301,6 +334,26 @@ function botDisplayName(record) {
 
 function botReadyLabel(record) {
   return record.ready || (record.zone && record.zone !== 'Unknown') ? 'Parked' : 'Unknown';
+}
+
+function rechargeLabel(record) {
+  return record.rechargedAt ? formatAge(record.rechargedAt) : 'never';
+}
+
+function rechargeCustomId(record) {
+  return [
+    'recharge',
+    encodeURIComponent(botDisplayName(record)),
+    encodeURIComponent(record.server || ''),
+  ].join(':');
+}
+
+function parseRechargeCustomId(customId) {
+  const [, character = '', server = ''] = String(customId || '').split(':');
+  return {
+    character: decodeURIComponent(character),
+    server: decodeURIComponent(server),
+  };
 }
 
 function groupBotsByClass(records) {
@@ -333,9 +386,16 @@ function buildRosterEmbeds(records, title = 'Safe Space Bot Roster') {
       `**${botDisplayName(record)}** · ${compactZone(record.zone)} · ${formatAge(record.enteredAt)}`
     ));
 
+    const rechargeLines = grouped[className].sort(sortBots).map((record) => [
+      `**${botDisplayName(record)}**`,
+      compactZone(record.zone),
+      `parked ${formatAge(record.enteredAt)}`,
+      `recharge ${rechargeLabel(record)}`,
+    ].join(' - '));
+
     fields.push({
       name: `${config.marker} ${config.label} (${grouped[className].length})`,
-      value: lines.join('\n').slice(0, 1024) || 'None',
+      value: rechargeLines.join('\n').slice(0, 1024) || lines.join('\n').slice(0, 1024) || 'None',
       inline: false,
     });
   });
@@ -359,6 +419,20 @@ function buildRosterEmbeds(records, title = 'Safe Space Bot Roster') {
   });
 }
 
+function buildRechargeComponents(records) {
+  const buttons = records.slice(0, 25).map((record) => new ButtonBuilder()
+    .setCustomId(rechargeCustomId(record))
+    .setLabel(`Recharge ${botDisplayName(record)}`.slice(0, 80))
+    .setStyle(ButtonStyle.Secondary));
+
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 5) {
+    rows.push(new ActionRowBuilder().addComponents(buttons.slice(index, index + 5)));
+  }
+
+  return rows;
+}
+
 function buildBotDetailEmbed(record) {
   const className = record.className || inferClass(record);
   const config = getClassConfig(className);
@@ -372,6 +446,7 @@ function buildBotDetailEmbed(record) {
       { name: 'Server', value: record.server || 'Unknown', inline: true },
       { name: 'Status', value: botReadyLabel(record), inline: true },
       { name: 'Parked', value: `${formatAge(record.enteredAt)} (${formatTimestamp(record.enteredAt)})`, inline: false },
+      { name: 'Recharged', value: record.rechargedAt ? `${formatAge(record.rechargedAt)} (${formatTimestamp(record.rechargedAt)})` : 'Never', inline: false },
       { name: 'Source', value: record.sourceFile || 'Unknown log file', inline: false },
     )
     .setTimestamp(new Date());
@@ -427,7 +502,10 @@ async function sendStatusChannelUpdate(channelId) {
   }
 
   const records = await fetchSafeBots();
-  const payload = { embeds: buildRosterEmbeds(records, STATUS_MESSAGE_TITLE) };
+  const payload = {
+    embeds: buildRosterEmbeds(records, STATUS_MESSAGE_TITLE),
+    components: buildRechargeComponents(records),
+  };
   const savedMessageId = await readStoredStatusMessageId(channelId);
 
   if (savedMessageId) {
@@ -493,6 +571,20 @@ client.once('clientReady', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton() && interaction.customId.startsWith('recharge:')) {
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const { character, server } = parseRechargeCustomId(interaction.customId);
+      const record = await setSafeBotRecharge(character, server);
+      if (interaction.channelId) await sendStatusChannelUpdate(interaction.channelId);
+      await interaction.editReply(`Marked **${botDisplayName(record)}** recharged at ${formatTimestamp(record.rechargedAt)}.`);
+    } catch (error) {
+      await interaction.editReply(`Could not update recharge time: ${error.message}`);
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   await interaction.deferReply({ ephemeral: interaction.commandName === 'setup' });
@@ -541,7 +633,7 @@ client.on('interactionCreate', async (interaction) => {
       const records = filterBots(await fetchSafeBots(), className, search);
       const title = className ? `Safe Space · ${formatClass(className)} Parking` : 'Safe Space Bot Roster';
 
-      await interaction.editReply({ embeds: buildRosterEmbeds(records, title) });
+      await interaction.editReply({ embeds: buildRosterEmbeds(records, title), components: buildRechargeComponents(records) });
       return;
     }
 
