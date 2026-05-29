@@ -190,6 +190,7 @@ Use `/safebots` or `/roster` in a Discord channel. Optional filters are availabl
 | `/bot name:<safe-bot>` | Shows a detail card for one Safe bot, including class, zone, server, parked time, and source log file. |
 | `/quake` | Posts a parking readiness summary that highlights priority classes separately from other parked bots. |
 | `/setclass name:<safe-bot> class:<class> [server]` | Manually assigns a class to a Safe bot. Choose `Unknown` to clear the manual override and return to name-based inference. Use `server` if multiple records share the same bot name. |
+| `/setup [channel]` | Server-manager setup command that stores the channel for automatic roster updates. Defaults to the channel where it is run. |
 
 Classes are inferred from Safe bot names by default. To override an inferred class, run:
 
@@ -201,11 +202,23 @@ Choose `Unknown` in `/setclass` to clear the manual override and return to name-
 
 In production, you can still run the web app and Discord bot as separate processes. For example, use `npm run start:web` for the Render web service, then add a Render Background Worker with start command `npm run start:bot` using the same Discord and EQLog API environment variables. If you use `npm start` on a service with Discord env vars present, it starts both processes together.
 
-For automatic channel posts, set:
+For automatic channel posts, either configure the channel from Discord with `/setup` or set a fallback channel in the environment.
+
+Recommended setup:
+
+1. Invite the bot with the `bot` and `applications.commands` scopes.
+2. Grant it `View Channel`, `Send Messages`, `Embed Links`, and `Read Message History`.
+3. In the target server, run:
+
+```text
+/setup channel:#eqlog-park
+```
+
+The bot stores the server/channel choice in MongoDB and refreshes that same roster message on future updates. If no channel is selected with `/setup`, you can still use the legacy environment variable:
 
 ```text
 DISCORD_STATUS_CHANNEL_ID=<channel id>
 DISCORD_AUTO_POST_MINUTES=60
 ```
 
-When `DISCORD_STATUS_CHANNEL_ID` is set, the bot posts one status message when it starts. If `DISCORD_AUTO_POST_MINUTES` is greater than `0`, the bot refreshes that same message instead of posting a new message each time. The saved message id is stored in MongoDB when `MONGODB_URI` is configured, with `data/discord-status-message.json` kept as a local fallback. If no saved id is available, the bot searches recent channel messages for its latest `Safe Bot Parking Update` embed before sending a new one.
+When a status channel is configured, the bot posts one status message when it starts. If `DISCORD_AUTO_POST_MINUTES` is greater than `0`, the bot refreshes that same message instead of posting a new message each time. The saved message id is stored in MongoDB when `MONGODB_URI` is configured, with `data/discord-status-message.json` kept as a local fallback. If no saved id is available, the bot searches recent channel messages for its latest `Safe Bot Parking Update` embed before sending a new one.

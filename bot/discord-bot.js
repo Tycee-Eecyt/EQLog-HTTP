@@ -7,6 +7,7 @@ const {
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  PermissionFlagsBits,
 } = require('discord.js');
 const {
   inferClass,
@@ -50,16 +51,79 @@ function cleanOptionalSnowflake(value, label) {
 const statusChannelId = cleanOptionalSnowflake(rawStatusChannelId, 'DISCORD_STATUS_CHANNEL_ID');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let mongoClient;
+let mongoConnected = false;
 let statusMessagesCollection;
+let guildSettingsCollection;
+
+async function getMongoDb() {
+  if (!mongodbUri) return null;
+  if (!mongoClient) mongoClient = new MongoClient(mongodbUri);
+  if (!mongoConnected) {
+    await mongoClient.connect();
+    mongoConnected = true;
+  }
+  return mongoClient.db(mongodbDb);
+}
 
 async function getStatusMessagesCollection() {
-  if (!mongodbUri) return null;
   if (statusMessagesCollection) return statusMessagesCollection;
 
-  mongoClient = new MongoClient(mongodbUri);
-  await mongoClient.connect();
-  statusMessagesCollection = mongoClient.db(mongodbDb).collection('discord_status_messages');
+  const db = await getMongoDb();
+  if (!db) return null;
+
+  statusMessagesCollection = db.collection('discord_status_messages');
   return statusMessagesCollection;
+}
+
+async function getGuildSettingsCollection() {
+  if (guildSettingsCollection) return guildSettingsCollection;
+
+  const db = await getMongoDb();
+  if (!db) return null;
+
+  guildSettingsCollection = db.collection('discord_guild_settings');
+  return guildSettingsCollection;
+}
+
+async function saveGuildStatusChannel(guild, channel, configuredBy) {
+  const collection = await getGuildSettingsCollection();
+  if (!collection) {
+    throw new Error('MONGODB_URI is required to save Discord setup from slash commands.');
+  }
+
+  await collection.updateOne(
+    { _id: guild.id },
+    {
+      $set: {
+        guildId: guild.id,
+        guildName: guild.name || '',
+        statusChannelId: channel.id,
+        statusChannelName: channel.name || '',
+        configuredBy,
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+}
+
+async function getConfiguredStatusChannelIds() {
+  const channelIds = new Set();
+  if (statusChannelId) channelIds.add(statusChannelId);
+
+  try {
+    const collection = await getGuildSettingsCollection();
+    if (collection) {
+      const records = await collection.find({ statusChannelId: { $type: 'string' } }).toArray();
+      records.forEach((record) => {
+        if (/^\d{17,20}$/.test(record.statusChannelId)) channelIds.add(record.statusChannelId);
+      });
+    }
+  } catch (error) {
+    console.warn(`Could not load configured Discord status channels: ${error.message}`);
+  }
+
+  return Array.from(channelIds);
 }
 
 async function readStoredStatusMessageId(channelId) {
@@ -344,27 +408,27 @@ function buildQuakeEmbeds(records) {
   return [embed];
 }
 
-async function sendStatusChannelUpdate() {
-  if (!statusChannelId) return;
+async function sendStatusChannelUpdate(channelId) {
+  if (!channelId) return null;
 
   let channel;
   try {
-    channel = await client.channels.fetch(statusChannelId);
+    channel = await client.channels.fetch(channelId);
   } catch (error) {
     if (error.code === 50001) {
-      throw new Error(`Missing access to DISCORD_STATUS_CHANNEL_ID ${statusChannelId}. Invite the bot to that server and grant it View Channel, Send Messages, and Embed Links permissions for the channel.`);
+      throw new Error(`Missing access to Discord status channel ${channelId}. Invite the bot to that server and grant it View Channel, Send Messages, Embed Links, and Read Message History permissions for the channel.`);
     }
 
     throw error;
   }
 
   if (!channel || !channel.isTextBased()) {
-    throw new Error(`DISCORD_STATUS_CHANNEL_ID ${statusChannelId} is not a text channel the bot can access.`);
+    throw new Error(`Discord status channel ${channelId} is not a text channel the bot can access.`);
   }
 
   const records = await fetchSafeBots();
   const payload = { embeds: buildRosterEmbeds(records, STATUS_MESSAGE_TITLE) };
-  const savedMessageId = await readStoredStatusMessageId(statusChannelId);
+  const savedMessageId = await readStoredStatusMessageId(channelId);
 
   if (savedMessageId) {
     try {
@@ -379,31 +443,48 @@ async function sendStatusChannelUpdate() {
   const existingMessage = await findExistingStatusMessage(channel);
   if (existingMessage) {
     await existingMessage.edit(payload);
-    await writeStoredStatusMessageId(statusChannelId, existingMessage.id);
+    await writeStoredStatusMessageId(channelId, existingMessage.id);
     return { action: 'edited', messageId: existingMessage.id };
   }
 
   const message = await channel.send(payload);
-  await writeStoredStatusMessageId(statusChannelId, message.id);
+  await writeStoredStatusMessageId(channelId, message.id);
   return { action: 'sent', messageId: message.id };
+}
+
+async function sendAllStatusChannelUpdates() {
+  const channelIds = await getConfiguredStatusChannelIds();
+  const results = [];
+
+  for (const channelId of channelIds) {
+    try {
+      const result = await sendStatusChannelUpdate(channelId);
+      if (result) {
+        console.log(`${result.action === 'edited' ? 'Refreshed' : 'Posted'} Safe bot status message ${result.messageId} in channel ${channelId}.`);
+        results.push({ channelId, ...result });
+      }
+    } catch (error) {
+      console.error(error);
+      results.push({ channelId, error });
+    }
+  }
+
+  return results;
 }
 
 client.once('clientReady', async () => {
   console.log(`Discord bot logged in as ${client.user.tag}.`);
 
-  if (statusChannelId) {
-    try {
-      const result = await sendStatusChannelUpdate();
-      console.log(`${result.action === 'edited' ? 'Refreshed' : 'Posted'} Safe bot status message ${result.messageId} in channel ${statusChannelId}.`);
-    } catch (error) {
-      console.error(error);
-    }
+  try {
+    await sendAllStatusChannelUpdates();
+  } catch (error) {
+    console.error(error);
   }
 
-  if (statusChannelId && autoPostMinutes > 0) {
+  if (autoPostMinutes > 0) {
     setInterval(async () => {
       try {
-        await sendStatusChannelUpdate();
+        await sendAllStatusChannelUpdates();
       } catch (error) {
         console.error(error);
       }
@@ -414,9 +495,46 @@ client.once('clientReady', async () => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  await interaction.deferReply();
+  await interaction.deferReply({ ephemeral: interaction.commandName === 'setup' });
 
   try {
+    if (interaction.commandName === 'setup') {
+      if (!interaction.guild) {
+        await interaction.editReply('Run this command inside a Discord server.');
+        return;
+      }
+
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        await interaction.editReply('You need Manage Server permission to configure the roster channel.');
+        return;
+      }
+
+      const channel = interaction.options.getChannel('channel') || interaction.channel;
+      if (!channel || channel.guildId !== interaction.guildId || !channel.isTextBased()) {
+        await interaction.editReply('Choose a text channel from this server.');
+        return;
+      }
+
+      const botMember = await interaction.guild.members.fetchMe();
+      const permissions = channel.permissionsFor(botMember);
+      const requiredPermissions = [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.ReadMessageHistory,
+      ];
+      const missing = requiredPermissions.filter((permission) => !permissions?.has(permission));
+      if (missing.length) {
+        await interaction.editReply('I need View Channel, Send Messages, Embed Links, and Read Message History permissions in that channel.');
+        return;
+      }
+
+      await saveGuildStatusChannel(interaction.guild, channel, interaction.user.id);
+      const result = await sendStatusChannelUpdate(channel.id);
+      await interaction.editReply(`Safe bot roster updates are configured for ${channel}. ${result?.action === 'edited' ? 'Updated' : 'Posted'} the roster message.`);
+      return;
+    }
+
     if (['safebots', 'roster', 'bots'].includes(interaction.commandName)) {
       const className = interaction.options.getString('class');
       const search = interaction.options.getString('search');

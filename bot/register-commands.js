@@ -1,6 +1,12 @@
 require('dotenv').config();
 
-const { REST, Routes, SlashCommandBuilder } = require('discord.js');
+const {
+  ChannelType,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require('discord.js');
 const { CLASS_ORDER, getClassConfig } = require('./roster-config');
 
 const token = process.env.DISCORD_TOKEN;
@@ -108,6 +114,16 @@ const setClassCommand = new SlashCommandBuilder()
     .setDescription('Optional server if multiple records have the same bot name.')
     .setRequired(false));
 
+const setupCommand = new SlashCommandBuilder()
+  .setName('setup')
+  .setDescription('Configure the automatic Safe bot roster update for this server.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addChannelOption((option) => option
+    .setName('channel')
+    .setDescription('Channel where the bot should post and refresh the roster. Defaults to this channel.')
+    .setRequired(false)
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement));
+
 const commands = [
   safebotsCommand,
   rosterCommand,
@@ -115,6 +131,7 @@ const commands = [
   botsCommand,
   quakeCommand,
   setClassCommand,
+  setupCommand,
 ].map((command) => command.toJSON());
 const rest = new REST({ version: '10' }).setToken(token);
 
