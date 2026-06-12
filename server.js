@@ -344,7 +344,6 @@ function toClientRecord(record) {
     timeZone: record.timeZone || '',
     sourceFile: record.sourceFile || '',
     sourceLine: record.sourceLine || '',
-    rechargedAt: record.rechargedAt ? new Date(record.rechargedAt).toISOString() : '',
     scannedAt: record.scannedAt instanceof Date ? record.scannedAt.toISOString() : new Date(record.scannedAt).toISOString(),
   };
 }
@@ -424,46 +423,6 @@ async function setPublicBotClass(character, className, server = '') {
   return toClientRecord(result);
 }
 
-async function setPublicBotRecharge(character, server = '', actor = {}) {
-  const collection = await getLocationsCollection();
-  const characterKey = normalizeKey(character);
-  const serverKey = normalizeKey(server);
-  const rechargedAt = new Date();
-
-  if (!characterKey) {
-    const error = new Error('character is required.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const result = await collection.findOneAndUpdate(
-    {
-      visibility: 'public',
-      characterKey,
-      ...(serverKey ? { serverKey } : {}),
-    },
-    {
-      $set: {
-        rechargedAt,
-        rechargedBy: actor.id || '',
-        rechargedByUsername: actor.username || '',
-      },
-    },
-    {
-      returnDocument: 'after',
-      sort: { enteredAt: -1 },
-    },
-  );
-
-  if (!result) {
-    const error = new Error('Safe bot record not found.');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  return toClientRecord(result);
-}
-
 function validateZoneEntry(entry) {
   const enteredAtMs = Date.parse(entry.enteredAt);
   if (!entry.character || !entry.server || !entry.zone || Number.isNaN(enteredAtMs)) {
@@ -475,7 +434,7 @@ function validateZoneEntry(entry) {
   return new Date(enteredAtMs);
 }
 
-async function applyLatestEntry(owner, entry, actor = {}) {
+async function applyLatestEntry(owner, entry) {
   const collection = await getLocationsCollection();
   const enteredAt = validateZoneEntry(entry);
   const character = String(entry.character).trim();
@@ -497,7 +456,6 @@ async function applyLatestEntry(owner, entry, actor = {}) {
         $set: {
           owner: recordOwner,
           scannedBy: owner,
-          scannedByUsername: actor.username || '',
           visibility,
           character,
           characterKey,
@@ -531,7 +489,7 @@ async function applyLatestEntry(owner, entry, actor = {}) {
   };
 }
 
-async function importZoneEntries(owner, entries, metadata = {}, actor = {}) {
+async function importZoneEntries(owner, entries, metadata = {}) {
   if (!Array.isArray(entries)) {
     const error = new Error('entries must be an array.');
     error.statusCode = 400;
@@ -541,7 +499,7 @@ async function importZoneEntries(owner, entries, metadata = {}, actor = {}) {
   const results = [];
 
   for (const entry of entries) {
-    results.push(await applyLatestEntry(owner, entry, actor));
+    results.push(await applyLatestEntry(owner, entry));
   }
 
   return {
@@ -589,7 +547,7 @@ function isInventoryFileName(fileName) {
   return /^[^-\\/:]+-Inventory.*\.txt$/i.test(baseName);
 }
 
-async function importInventoryFiles(owner, files, actor = {}) {
+async function importInventoryFiles(owner, files) {
   if (!Array.isArray(files)) {
     const error = new Error('files must be an array.');
     error.statusCode = 400;
@@ -634,8 +592,6 @@ async function importInventoryFiles(owner, files, actor = {}) {
         {
           $set: {
             owner,
-            scannedBy: owner,
-            scannedByUsername: actor.username || '',
             fileKey,
             fileName,
             character,
@@ -813,16 +769,6 @@ app.post('/api/discord/bots/:character/class', requireAuthOrDiscordToken, async 
   }
 });
 
-app.post('/api/discord/bots/:character/recharge', requireAuthOrDiscordToken, async (req, res, next) => {
-  try {
-    res.json({
-      record: await setPublicBotRecharge(req.params.character, req.body.server, req.user),
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.post('/api/import-zone-entries', requireAuth, async (req, res, next) => {
   try {
     const scan = await importZoneEntries(req.user.id, req.body.entries, {
@@ -830,7 +776,7 @@ app.post('/api/import-zone-entries', requireAuth, async (req, res, next) => {
       scannedFiles: req.body.scannedFiles,
       withoutZoneEntry: req.body.withoutZoneEntry,
       errors: req.body.errors,
-    }, req.user);
+    });
     res.json(scan);
   } catch (error) {
     next(error);
@@ -847,7 +793,7 @@ app.get('/api/inventory', requireAuth, async (req, res, next) => {
 
 app.post('/api/import-inventory-files', requireAuth, async (req, res, next) => {
   try {
-    res.json(await importInventoryFiles(req.user.id, req.body.files, req.user));
+    res.json(await importInventoryFiles(req.user.id, req.body.files));
   } catch (error) {
     next(error);
   }
